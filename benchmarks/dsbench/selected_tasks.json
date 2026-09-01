@@ -1,0 +1,9 @@
+{
+  "benchmark": "dsbench",
+  "target_task_count": 40,
+  "target_mix": {
+    "analysis": 30,
+    "modeling": 10
+  },
+  "tasks": []
+}
