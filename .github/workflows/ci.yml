@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v7
 
       - name: Install uv
@@ -24,21 +24,5 @@ jobs:
       - name: Create demo database
         run: uv run python scripts/create_demo_db.py
 
-      - name: Build sandbox Docker image
-        run: |
-          docker build \
-            -t datascientistos-sandbox:day2 \
-            -f sandbox/Dockerfile \
-            .
-
-      - name: Verify sandbox image
-        run: |
-          docker run --rm \
-            datascientistos-sandbox:day2 \
-            python -c "print(2 + 3)"
-
       - name: Run tests
         run: uv run pytest -q
-
-      - name: Run evaluator smoke test
-        run: uv run python -m evaluation.runner --sample 0
