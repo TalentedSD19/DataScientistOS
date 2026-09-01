@@ -21,6 +21,24 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Verify demo dataset
+        run: |
+          test -f data/demo.db
+          echo "Demo database found"
+
+      - name: Build sandbox Docker image
+        run: |
+          docker build \
+            -t datascientistos-sandbox:day2 \
+            -f sandbox/Dockerfile \
+            .
+
+      - name: Verify sandbox image
+        run: |
+          docker run --rm \
+            datascientistos-sandbox:day2 \
+            python -c "print(2 + 3)"
+
       - name: Run tests
         run: uv run pytest -q
 
