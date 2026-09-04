@@ -811,16 +811,20 @@ def train_model(
                 "Target must contain at least two classes."
             )
 
-        categorical_features = [
-            column
-            for column in features
-            if X[column].dtype == "object"
-        ]
-
+        # pandas >= 3.0 infers plain text columns as a dedicated
+        # "str" dtype rather than "object", so checking for
+        # dtype == "object" silently misses them and lets raw
+        # text reach the model as if it were numeric.
         numeric_features = [
             column
             for column in features
-            if column not in categorical_features
+            if pd.api.types.is_numeric_dtype(X[column])
+        ]
+
+        categorical_features = [
+            column
+            for column in features
+            if column not in numeric_features
         ]
 
         preprocess = ColumnTransformer(

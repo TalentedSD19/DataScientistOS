@@ -234,9 +234,15 @@ async def _run_statistics(
     profile: dict[str, Any],
 ) -> AgentOutput:
 
-    start = int(time.time() * 1000)
+    steps: list[Any] = []
+    errors: list[dict[str, Any]] = []
+    current_error: str | None = None
 
-    prompt = f"""
+    # Initial attempt + maximum two repairs.
+    for attempt in range(3):
+        start = int(time.time() * 1000)
+
+        prompt = f"""
 {STATS_PROMPT}
 
 Question:
@@ -248,121 +254,147 @@ Dataset:
 Profile:
 {compact_json(profile)}
 
+Attempt:
+{attempt + 1}
+
+Previous error:
+{current_error or "None"}
+
 Choose one appropriate statistical operation and write the SQL
 query that returns the raw rows it needs, per the shape rules
 above.
 """
 
-    model = structured_llm(StatisticsAction)
+        model = structured_llm(StatisticsAction)
 
-    action: StatisticsAction = await model.ainvoke(prompt)
+        action: StatisticsAction = await model.ainvoke(prompt)
 
-    sql_result: dict[str, Any] | None = None
+        sql_result: dict[str, Any] | None = None
 
-    try:
-        sql_result = await mcp.call(
-            "run_sql",
-            {
-                "dataset": dataset,
-                "query": action.sql_query,
-            },
-        )
+        try:
+            sql_result = await mcp.call(
+                "run_sql",
+                {
+                    "dataset": dataset,
+                    "query": action.sql_query,
+                },
+            )
 
-        if not sql_result.get("success", False):
-            raise ValueError(
-                sql_result.get(
-                    "error",
-                    "run_sql reported failure.",
+            if not sql_result.get("success", False):
+                raise ValueError(
+                    sql_result.get(
+                        "error",
+                        "run_sql reported failure.",
+                    )
+                )
+
+            data_spec = _build_statistics_data_spec(
+                action.operation,
+                sql_result["columns"],
+                sql_result["rows"],
+            )
+
+        except Exception as exc:
+            current_error = str(exc)
+
+            steps.append(
+                create_step(
+                    agent="stats_ml",
+                    action="run_sql",
+                    status="failed",
+                    duration=int(time.time() * 1000) - start,
+                    message=current_error,
                 )
             )
 
-        data_spec = _build_statistics_data_spec(
-            action.operation,
-            sql_result["columns"],
-            sql_result["rows"],
-        )
-
-    except Exception as exc:
-        step = create_step(
-            agent="stats_ml",
-            action="run_sql",
-            status="failed",
-            duration=int(time.time() * 1000) - start,
-            message=str(exc),
-        )
-
-        return AgentOutput(
-            tool_results=[
-                {
-                    "tool": "run_sql",
-                    "query": action.sql_query,
-                    "result": sql_result,
-                }
-            ],
-            steps=[step],
-            errors=[
+            errors.append(
                 {
                     "type": "runtime",
-                    "message": str(exc),
+                    "message": current_error,
+                    "attempt": attempt + 1,
                 }
-            ],
+            )
+
+            if attempt == 2:
+                return AgentOutput(
+                    tool_results=[
+                        {
+                            "tool": "run_sql",
+                            "query": action.sql_query,
+                            "result": sql_result,
+                        }
+                    ],
+                    steps=steps,
+                    errors=errors,
+                )
+
+            continue
+
+        result = await mcp.call(
+            "run_statistics",
+            {
+                "test": action.operation,
+                "data": data_spec,
+            },
         )
 
-    result = await mcp.call(
-        "run_statistics",
-        {
-            "test": action.operation,
-            "data": data_spec,
-        },
-    )
+        if not result.get("success", False):
+            error_message = result.get(
+                "error",
+                "run_statistics reported failure.",
+            )
 
-    if not result.get("success", False):
-        error_message = result.get(
-            "error",
-            "run_statistics reported failure.",
-        )
+            current_error = error_message
 
-        step = create_step(
-            agent="stats_ml",
-            action="run_statistics",
-            status="failed",
-            duration=int(time.time() * 1000) - start,
-            message=error_message,
-        )
+            steps.append(
+                create_step(
+                    agent="stats_ml",
+                    action="run_statistics",
+                    status="failed",
+                    duration=int(time.time() * 1000) - start,
+                    message=error_message,
+                )
+            )
 
-        return AgentOutput(
-            tool_results=[
-                {
-                    "tool": "run_sql",
-                    "query": action.sql_query,
-                    "result": sql_result,
-                },
-                {
-                    "tool": "run_statistics",
-                    "operation": action.operation,
-                    "data": data_spec,
-                    "result": result,
-                },
-            ],
-            steps=[step],
-            errors=[
+            errors.append(
                 {
                     "type": "runtime",
                     "message": error_message,
+                    "attempt": attempt + 1,
                 }
-            ],
+            )
+
+            if attempt == 2:
+                return AgentOutput(
+                    tool_results=[
+                        {
+                            "tool": "run_sql",
+                            "query": action.sql_query,
+                            "result": sql_result,
+                        },
+                        {
+                            "tool": "run_statistics",
+                            "operation": action.operation,
+                            "data": data_spec,
+                            "result": result,
+                        },
+                    ],
+                    steps=steps,
+                    errors=errors,
+                )
+
+            continue
+
+        evidence_id = new_id("evidence")
+
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            kind="stat_test",
+            step_id="pending",
+            summary=action.purpose,
         )
 
-    evidence_id = new_id("evidence")
-
-    evidence = Evidence(
-        evidence_id=evidence_id,
-        kind="stat_test",
-        step_id="pending",
-        summary=action.purpose,
-    )
-
-    finding_prompt = f"""
+        finding_prompt = f"""
 Question:
 {question}
 
@@ -380,42 +412,49 @@ Do not invent or calculate additional numbers.
 Do not imply causation.
 """
 
-    finding_model = structured_llm(Finding)
+        finding_model = structured_llm(Finding)
 
-    finding: Finding = await finding_model.ainvoke(
-        finding_prompt
-    )
+        finding: Finding = await finding_model.ainvoke(
+            finding_prompt
+        )
 
-    finding.evidence_ids = [evidence_id]
+        finding.evidence_ids = [evidence_id]
 
-    step = create_step(
-        agent="stats_ml",
-        action="run_statistics",
-        status="success",
-        duration=int(time.time() * 1000) - start,
-        message=f"Ran {action.operation}",
-        evidence_ids=[evidence_id],
-    )
+        step = create_step(
+            agent="stats_ml",
+            action="run_statistics",
+            status="success",
+            duration=int(time.time() * 1000) - start,
+            message=f"Ran {action.operation} on attempt {attempt + 1}",
+            evidence_ids=[evidence_id],
+        )
 
-    evidence.step_id = step.step_id
+        evidence.step_id = step.step_id
+
+        steps.append(step)
+
+        return AgentOutput(
+            findings=[finding],
+            evidence=[evidence],
+            tool_results=[
+                {
+                    "tool": "run_sql",
+                    "query": action.sql_query,
+                    "result": sql_result,
+                },
+                {
+                    "tool": "run_statistics",
+                    "operation": action.operation,
+                    "data": data_spec,
+                    "result": result,
+                },
+            ],
+            steps=steps,
+        )
 
     return AgentOutput(
-        findings=[finding],
-        evidence=[evidence],
-        tool_results=[
-            {
-                "tool": "run_sql",
-                "query": action.sql_query,
-                "result": sql_result,
-            },
-            {
-                "tool": "run_statistics",
-                "operation": action.operation,
-                "data": data_spec,
-                "result": result,
-            },
-        ],
-        steps=[step],
+        steps=steps,
+        errors=errors,
     )
 
 
@@ -427,9 +466,15 @@ async def _run_ml(
     target: str,
 ) -> AgentOutput:
 
-    start = int(time.time() * 1000)
+    steps: list[Any] = []
+    errors: list[dict[str, Any]] = []
+    current_error: str | None = None
 
-    prompt = f"""
+    # Initial attempt + maximum two repairs.
+    for attempt in range(3):
+        start = int(time.time() * 1000)
+
+        prompt = f"""
 {STATS_PROMPT}
 
 Question:
@@ -444,7 +489,15 @@ Profile:
 Target:
 {target}
 
+Attempt:
+{attempt + 1}
+
+Previous error:
+{current_error or "None"}
+
 Choose features that are available in the schema.
+Use exact column names from the profile -- never a
+table-qualified name (e.g. "churn", not "customers.churn").
 
 Prefer logistic_regression first.
 Choose random_forest or xgboost only when appropriate.
@@ -453,61 +506,71 @@ Do not include the target itself as a feature.
 Watch for obvious leakage.
 """
 
-    model = structured_llm(MLAction)
+        model = structured_llm(MLAction)
 
-    action: MLAction = await model.ainvoke(prompt)
+        action: MLAction = await model.ainvoke(prompt)
 
-    result = await mcp.call(
-        "train_model",
-        {
-            "dataset": dataset,
-            "target": action.target,
-            "features": action.features,
-            "model_type": action.model_type,
-        },
-    )
-
-    if not result.get("success", False):
-        error_message = result.get(
-            "error",
-            "train_model reported failure.",
+        result = await mcp.call(
+            "train_model",
+            {
+                "dataset": dataset,
+                "target": action.target,
+                "features": action.features,
+                "model_type": action.model_type,
+            },
         )
 
-        step = create_step(
-            agent="stats_ml",
-            action="train_model",
-            status="failed",
-            duration=int(time.time() * 1000) - start,
-            message=error_message,
-        )
+        if not result.get("success", False):
+            error_message = result.get(
+                "error",
+                "train_model reported failure.",
+            )
 
-        return AgentOutput(
-            tool_results=[
-                {
-                    "tool": "train_model",
-                    "model": action.model_type,
-                    "result": result,
-                }
-            ],
-            steps=[step],
-            errors=[
+            current_error = error_message
+
+            steps.append(
+                create_step(
+                    agent="stats_ml",
+                    action="train_model",
+                    status="failed",
+                    duration=int(time.time() * 1000) - start,
+                    message=error_message,
+                )
+            )
+
+            errors.append(
                 {
                     "type": "runtime",
                     "message": error_message,
+                    "attempt": attempt + 1,
                 }
-            ],
+            )
+
+            if attempt == 2:
+                return AgentOutput(
+                    tool_results=[
+                        {
+                            "tool": "train_model",
+                            "model": action.model_type,
+                            "result": result,
+                        }
+                    ],
+                    steps=steps,
+                    errors=errors,
+                )
+
+            continue
+
+        evidence_id = new_id("evidence")
+
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            kind="model",
+            step_id="pending",
+            summary=action.purpose,
         )
 
-    evidence_id = new_id("evidence")
-
-    evidence = Evidence(
-        evidence_id=evidence_id,
-        kind="model",
-        step_id="pending",
-        summary=action.purpose,
-    )
-
-    finding_prompt = f"""
+        finding_prompt = f"""
 Question:
 {question}
 
@@ -532,34 +595,41 @@ only when the result explicitly contains that evidence.
 Mention leakage warnings when present.
 """
 
-    finding_model = structured_llm(Finding)
+        finding_model = structured_llm(Finding)
 
-    finding: Finding = await finding_model.ainvoke(
-        finding_prompt
-    )
+        finding: Finding = await finding_model.ainvoke(
+            finding_prompt
+        )
 
-    finding.evidence_ids = [evidence_id]
+        finding.evidence_ids = [evidence_id]
 
-    step = create_step(
-        agent="stats_ml",
-        action="train_model",
-        status="success",
-        duration=int(time.time() * 1000) - start,
-        message=f"Trained {action.model_type}",
-        evidence_ids=[evidence_id],
-    )
+        step = create_step(
+            agent="stats_ml",
+            action="train_model",
+            status="success",
+            duration=int(time.time() * 1000) - start,
+            message=f"Trained {action.model_type} on attempt {attempt + 1}",
+            evidence_ids=[evidence_id],
+        )
 
-    evidence.step_id = step.step_id
+        evidence.step_id = step.step_id
+
+        steps.append(step)
+
+        return AgentOutput(
+            findings=[finding],
+            evidence=[evidence],
+            tool_results=[
+                {
+                    "tool": "train_model",
+                    "model": action.model_type,
+                    "result": result,
+                }
+            ],
+            steps=steps,
+        )
 
     return AgentOutput(
-        findings=[finding],
-        evidence=[evidence],
-        tool_results=[
-            {
-                "tool": "train_model",
-                "model": action.model_type,
-                "result": result,
-            }
-        ],
-        steps=[step],
+        steps=steps,
+        errors=errors,
     )

@@ -52,6 +52,11 @@ sample values as a substitute for the real table.
 
 Do not invent numbers.
 Do not claim Python ran unless the tool confirms execution.
+
+If you compute a correlation, coefficient, or any other purely
+numeric quantity, restrict it to numeric columns only. Encode or
+exclude categorical (text) columns first -- never pass a text
+column into a numeric computation.
 """
 
 
@@ -86,9 +91,15 @@ async def _run_eda_agent(
     profile: dict[str, Any],
 ) -> AgentOutput:
 
-    start = int(time.time() * 1000)
+    steps: list[Any] = []
+    errors: list[dict[str, Any]] = []
+    current_error: str | None = None
 
-    prompt = f"""
+    # Initial attempt + maximum two repairs.
+    for attempt in range(3):
+        start = int(time.time() * 1000)
+
+        prompt = f"""
 {SYSTEM_PROMPT}
 
 Question:
@@ -100,6 +111,12 @@ Dataset:
 Data profile:
 {compact_json(profile)}
 
+Attempt:
+{attempt + 1}
+
+Previous error:
+{current_error or "None"}
+
 Generate one focused Python analysis.
 
 The code should:
@@ -109,83 +126,93 @@ The code should:
 4. create a chart only when useful
 """
 
-    model = structured_llm(EDAAction)
+        try:
+            model = structured_llm(EDAAction)
 
-    action: EDAAction = await model.ainvoke(prompt)
+            action: EDAAction = await model.ainvoke(prompt)
 
-    code = action.code
+            code = action.code
 
-    # Some structured-output responses emit literal backslash-n
-    # instead of real newlines (single-line code with escape
-    # sequences, no actual line breaks). Normalize only that
-    # pathological case rather than every occurrence of "\n",
-    # since real code may legitimately contain it inside strings.
-    if "\n" not in code and "\\n" in code:
-        code = code.encode(
-            "utf-8"
-        ).decode("unicode_escape")
+            # Some structured-output responses emit literal backslash-n
+            # instead of real newlines (single-line code with escape
+            # sequences, no actual line breaks). Normalize only that
+            # pathological case rather than every occurrence of "\n",
+            # since real code may legitimately contain it inside strings.
+            if "\n" not in code and "\\n" in code:
+                code = code.encode(
+                    "utf-8"
+                ).decode("unicode_escape")
 
-    try:
-        result = await mcp.call(
-            "run_python",
-            {
-                "dataset": dataset,
-                "code": code,
-            },
-        )
-
-        if not result.get("success", False):
-            error_message = result.get(
-                "error",
-                "run_python reported failure.",
+            result = await mcp.call(
+                "run_python",
+                {
+                    "dataset": dataset,
+                    "code": code,
+                },
             )
 
-            step = create_step(
-                agent="eda_analyst",
-                action="run_python",
-                status="failed",
-                duration=int(time.time() * 1000) - start,
-                message=error_message,
-            )
+            if not result.get("success", False):
+                error_message = result.get(
+                    "error",
+                    "run_python reported failure.",
+                )
 
-            return AgentOutput(
-                tool_results=[
-                    {
-                        "tool": "run_python",
-                        "code": code,
-                        "result": result,
-                    }
-                ],
-                steps=[step],
-                errors=[
+                current_error = error_message
+
+                steps.append(
+                    create_step(
+                        agent="eda_analyst",
+                        action="run_python",
+                        status="failed",
+                        duration=int(time.time() * 1000) - start,
+                        message=error_message,
+                    )
+                )
+
+                errors.append(
                     {
                         "type": "runtime",
                         "message": error_message,
+                        "attempt": attempt + 1,
                     }
-                ],
+                )
+
+                if attempt == 2:
+                    return AgentOutput(
+                        tool_results=[
+                            {
+                                "tool": "run_python",
+                                "code": code,
+                                "result": result,
+                            }
+                        ],
+                        steps=steps,
+                        errors=errors,
+                    )
+
+                continue
+
+            evidence_id = new_id("evidence")
+
+            evidence_kind = (
+                "chart"
+                if result.get("artifacts")
+                else "python"
             )
 
-        evidence_id = new_id("evidence")
+            evidence = Evidence(
+                evidence_id=evidence_id,
+                kind=evidence_kind,
+                step_id="pending",
+                summary=action.purpose,
+                artifact_path=(
+                    result.get("artifacts", [None])[0]
+                    if result.get("artifacts")
+                    else None
+                ),
+            )
 
-        evidence_kind = (
-            "chart"
-            if result.get("artifacts")
-            else "python"
-        )
-
-        evidence = Evidence(
-            evidence_id=evidence_id,
-            kind=evidence_kind,
-            step_id="pending",
-            summary=action.purpose,
-            artifact_path=(
-                result.get("artifacts", [None])[0]
-                if result.get("artifacts")
-                else None
-            ),
-        )
-
-        finding_prompt = f"""
+            finding_prompt = f"""
 Question:
 {question}
 
@@ -202,53 +229,69 @@ Do not calculate new values.
 Do not invent results.
 """
 
-        finding_model = structured_llm(Finding)
+            finding_model = structured_llm(Finding)
 
-        finding: Finding = await finding_model.ainvoke(
-            finding_prompt
-        )
+            finding: Finding = await finding_model.ainvoke(
+                finding_prompt
+            )
 
-        finding.evidence_ids = [evidence_id]
+            finding.evidence_ids = [evidence_id]
 
-        step = create_step(
-            agent="eda_analyst",
-            action="run_python",
-            status="success",
-            duration=int(time.time() * 1000) - start,
-            message="EDA analysis completed",
-            evidence_ids=[evidence_id],
-        )
+            step = create_step(
+                agent="eda_analyst",
+                action="run_python",
+                status="success",
+                duration=int(time.time() * 1000) - start,
+                message=f"EDA analysis completed on attempt {attempt + 1}",
+                evidence_ids=[evidence_id],
+            )
 
-        evidence.step_id = step.step_id
+            evidence.step_id = step.step_id
 
-        return AgentOutput(
-            findings=[finding],
-            evidence=[evidence],
-            tool_results=[
-                {
-                    "tool": "run_python",
-                    "code": action.code,
-                    "result": result,
-                }
-            ],
-            steps=[step],
-        )
+            steps.append(step)
 
-    except Exception as exc:
-        step = create_step(
-            agent="eda_analyst",
-            action="run_python",
-            status="failed",
-            duration=int(time.time() * 1000) - start,
-            message=str(exc),
-        )
+            return AgentOutput(
+                findings=[finding],
+                evidence=[evidence],
+                tool_results=[
+                    {
+                        "tool": "run_python",
+                        "code": action.code,
+                        "result": result,
+                    }
+                ],
+                steps=steps,
+                errors=errors,
+            )
 
-        return AgentOutput(
-            steps=[step],
-            errors=[
+        except Exception as exc:
+            current_error = str(exc)
+
+            steps.append(
+                create_step(
+                    agent="eda_analyst",
+                    action="run_python",
+                    status="failed",
+                    duration=int(time.time() * 1000) - start,
+                    message=current_error,
+                )
+            )
+
+            errors.append(
                 {
                     "type": "runtime",
-                    "message": str(exc),
+                    "message": current_error,
+                    "attempt": attempt + 1,
                 }
-            ],
-        )
+            )
+
+            if attempt == 2:
+                return AgentOutput(
+                    steps=steps,
+                    errors=errors,
+                )
+
+    return AgentOutput(
+        steps=steps,
+        errors=errors,
+    )
