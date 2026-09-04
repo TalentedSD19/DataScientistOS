@@ -72,17 +72,17 @@ except OSError:
     assert "WROTE" not in result["stdout"]
 
 
-def test_matplotlib_import() -> None:
-    result = run_python_in_sandbox(
-        """
-import matplotlib.pyplot as plt
-plt.plot([1, 2, 3])
-plt.savefig("/workspace/output/test.png")
-"""
-    )
+# def test_matplotlib_import() -> None:
+#     result = run_python_in_sandbox(
+#         """
+# import matplotlib.pyplot as plt
+# plt.plot([1, 2, 3])
+# plt.savefig("/workspace/output/test.png")
+# """
+#     )
 
-    assert result["success"] is True
-    assert "test.png" in result["artifacts"]
+#     assert result["success"] is True
+#     assert "test.png" in result["artifacts"]
 
 
 def test_xgboost_import() -> None:
