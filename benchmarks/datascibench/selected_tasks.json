@@ -1,5 +1,113 @@
 {
   "benchmark": "datascibench",
+  "source_repository": "https://github.com/THUDM/DataSciBench",
   "target_task_count": 20,
-  "tasks": []
+  "task_count": 20,
+  "tasks": [
+    {
+      "id": "bcb1011",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1017",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb102",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1024",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1035",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1037",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb104",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1043",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb105",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1051",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb106",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1060",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1061",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1062",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1063",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1064",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1078",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1079",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1083",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    },
+    {
+      "id": "bcb1089",
+      "task_type": "data_analysis",
+      "data_source_type": "1_bcb"
+    }
+  ],
+  "notes": [
+    "Task ids are copied verbatim from directory names under external/datascibench/data/, cloned from the official repository.",
+    "Each task prompt is self-contained (external/datascibench/data/<id>/prompt.json) and requires no separate data download.",
+    "Ground truth / evaluation harness stays under external/datascibench/ (evaluator-only) and must never be copied into the agent-visible workspace."
+  ]
 }

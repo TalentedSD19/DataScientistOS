@@ -1,9 +1,217 @@
 {
   "benchmark": "dsbench",
+  "source_repository": "https://github.com/LiqiangJing/DSBench",
   "target_task_count": 40,
   "target_mix": {
     "analysis": 30,
     "modeling": 10
   },
-  "tasks": []
+  "task_count": 40,
+  "tasks": [
+    {
+      "id": "00000001",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000002",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000003",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000004",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000005",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000006",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000007",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000008",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000009",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000010",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000011",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000012",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000013",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000014",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000016",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000017",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000018",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000019",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000020",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000022",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000025",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000026",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000027",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000028",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000029",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000030",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000031",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000032",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000033",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "00000034",
+      "category": "analysis",
+      "source": "data_analysis/data.json"
+    },
+    {
+      "id": "titanic",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "santander-customer-transaction-prediction",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "porto-seguro-safe-driver-prediction",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "santander-customer-satisfaction",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "santander-value-prediction-challenge",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "commonlitreadabilityprize",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "playground-series-s4e1",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "playground-series-s4e2",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "bike-sharing-demand",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    },
+    {
+      "id": "playground-series-s4e5",
+      "category": "modeling",
+      "source": "data_modeling/data.json"
+    }
+  ],
+  "notes": [
+    "Task ids/names are copied verbatim from the official DSBench data.json manifests in external/dsbench/.",
+    "Raw competition/Kaggle data is NOT bundled here; download it per external/dsbench/data_analysis/readme.md and data_modeling/readme.md before running these tasks.",
+    "Reference answers stay in external/dsbench/ (evaluator-only) and must never be copied into the agent-visible workspace."
+  ]
 }
