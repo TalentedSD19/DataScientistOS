@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+# Some plotting / image libraries need these system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libglib2.0-0 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-runtime.txt /tmp/requirements-runtime.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-runtime.txt
+
+# Agg = draw charts to a file instead of trying to open a window
+ENV MPLBACKEND=Agg
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /workspace
+
+# Keep the container alive so we can run many commands inside it
+CMD ["sleep", "infinity"]

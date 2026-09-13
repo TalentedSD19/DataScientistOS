@@ -57,6 +57,7 @@ logs/
 *.pkl
 *.pickle
 *.joblib
+storage/
 
 # Temporary files
 *.tmp
