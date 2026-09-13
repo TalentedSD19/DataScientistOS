@@ -29,3 +29,21 @@ class TaskSpec(BaseModel):
     required_outputs: list[str] = []         # the most important field
     requirements: list[Requirement] = []
     constraints: list[str] = []              # "10-fold CV", "epochs = 60"
+
+class Issue(BaseModel):
+    """One problem the validator found."""
+    severity: Literal["high", "medium", "low"]
+    type: str        # runtime_error / missing_output / bad_artifact / missing_requirement
+    message: str
+
+
+class ValidationReport(BaseModel):
+    """The verdict on one attempt."""
+    status: Literal["PASS", "FAIL"]
+    execution_score: float = 0.0     # did it run
+    artifact_score: float = 0.0      # were the files made
+    requirement_score: float = 0.0   # are the files right
+    semantic_score: float = 0.0      # did it follow the rules
+    final_score: float = 0.0
+    issues: list[Issue] = []
+    repair_instruction: str = ""     # what to tell the coder

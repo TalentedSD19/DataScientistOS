@@ -46,6 +46,9 @@ error output: {stderr}
 PROBLEMS FOUND:
 {issues}
 
+WHAT TO DO:
+{instruction}
+
 Fix only what is broken. Keep everything that already worked.
 Reply with the complete corrected src/main.py."""
 
@@ -72,6 +75,7 @@ async def code_node(state: dict) -> dict:
             exit_code=run.get("exit_code"),
             stderr=(run.get("stderr") or "")[-2000:],
             issues=json.dumps(state["validation"].get("issues", []), indent=2),
+            instruction=state["validation"].get("repair_instruction", ""),
         )
         mode = "patch"
     else:
