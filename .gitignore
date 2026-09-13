@@ -1,36 +1,64 @@
 # Python
-.venv/
 __pycache__/
-\__pycache__
 *.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing / coverage
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Type checking / linting
 .mypy_cache/
 .ruff_cache/
 
-# Environment/secrets
-.env
-
-# Node
-node_modules/
+# Build / packaging
+build/
 dist/
-
-# Local data
-data/
-artifacts/
-plan.md
-
-# Databases
-*.db
-*.sqlite
-*.sqlite3
+*.egg-info/
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# IDE
-.vscode/
-.idea/
+# Logs
+*.log
+logs/
 
-# Benchmark clones
-external/
+# Data / generated files
+*.csv
+*.parquet
+*.pkl
+*.pickle
+*.joblib
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
