@@ -102,10 +102,31 @@ def validate_model(task_id: str, name: str) -> str:
             model = joblib.load(p)
         except Exception as e:
             return json.dumps({"valid": False, "issues": [f"{name} would not load: {e}"]})
-        can_predict = hasattr(model, "predict")
+
+        if not hasattr(model, "predict"):
+            return json.dumps({
+                "valid": False,
+                "issues": [f"{name} has no predict() method"],
+                "model_type": type(model).__name__,
+            })
+
+        from sklearn.exceptions import NotFittedError
+        from sklearn.utils.validation import check_is_fitted
+        try:
+            check_is_fitted(model)
+        except NotFittedError:
+            return json.dumps({
+                "valid": False,
+                "issues": [f"{name} was saved before being fit on the full data "
+                           f"(cross_val_score does not fit the original estimator)"],
+                "model_type": type(model).__name__,
+            })
+        except TypeError:
+            pass  # not a plain sklearn estimator; skip the fitted check
+
         return json.dumps({
-            "valid": can_predict,
-            "issues": [] if can_predict else [f"{name} has no predict() method"],
+            "valid": True,
+            "issues": [],
             "model_type": type(model).__name__,
         })
 

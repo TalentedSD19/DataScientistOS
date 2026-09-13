@@ -14,6 +14,9 @@ STORAGE.mkdir(parents=True, exist_ok=True)
 RUNTIME_IMAGE = os.getenv("RUNTIME_IMAGE", "datasci-runtime:latest")
 EXEC_TIMEOUT = int(os.getenv("EXEC_TIMEOUT_SECONDS", "600"))
 
+# How many times the code/validate loop can retry before giving up
+MAX_REPAIR_ATTEMPTS = int(os.getenv("MAX_REPAIR_ATTEMPTS", "3"))
+
 # Limits for the sandbox container
 CPU_LIMIT = float(os.getenv("CPU_LIMIT", "4"))
 MEM_LIMIT = os.getenv("MEM_LIMIT", "6g")
