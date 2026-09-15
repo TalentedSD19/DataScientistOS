@@ -14,14 +14,14 @@ agents until an LLM judge decides the current plan and code are sufficient:
 flowchart TD
     START(["input files + query"]) --> Analyzer
 
-    Analyzer["🔍 Analyzer<br/><small>describes every file:<br/>schema, sample rows, ...</small>"]
-    Retriever["📌 Retriever<br/><small>keeps top-K relevant files<br/>only above 100 input files</small>"]
-    Planner["🧠 Planner<br/><small>proposes one small,<br/>concrete next step</small>"]
-    Coder["💻 Coder<br/><small>writes the step into<br/>src/main.py</small>"]
-    Executor["▶️ Executor<br/><small>runs main.py in the<br/>task's Docker sandbox</small>"]
-    Debugger["🛠️ Debugger<br/><small>pip installs missing pkgs,<br/>else fixes the traceback</small>"]
-    Verifier["✅ Verifier<br/><small>LLM judge: is the plan + code<br/>+ output enough to answer?</small>"]
-    Router["🔀 Router<br/><small>ADD_STEP, or BACKTRACK<br/>to redo a bad step</small>"]
+    Analyzer["Analyzer<br/><small>describes every file:<br/>schema, sample rows, ...</small>"]
+    Retriever["Retriever<br/><small>keeps top-K relevant files<br/>only above 100 input files</small>"]
+    Planner["Planner<br/><small>proposes one small,<br/>concrete next step</small>"]
+    Coder["Coder<br/><small>writes the step into<br/>src/main.py</small>"]
+    Executor["Executor<br/><small>runs main.py in the<br/>task's Docker sandbox</small>"]
+    Debugger["Debugger<br/><small>pip installs missing pkgs,<br/>else fixes the traceback</small>"]
+    Verifier["Verifier<br/><small>LLM judge: is the plan + code<br/>+ output enough to answer?</small>"]
+    Router["Router<br/><small>ADD_STEP, or BACKTRACK<br/>to redo a bad step</small>"]
 
     ExecDecision{"exit code?"}
     VerifierDecision{"verifier_status?"}
