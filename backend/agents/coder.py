@@ -15,6 +15,16 @@ Rules you must follow:
   os.makedirs('', exist_ok=True) raises FileNotFoundError.
 - For charts use matplotlib, never call plt.show(), always plt.savefig(...) then plt.close().
 - Only use column names from the data profile you are given.
+- After any step that renames, drops, or selects columns (train/test split,
+  feature selection, dropna on a subset, etc.), a column you used before that
+  step may no longer exist. Before referencing a target/label/id column again
+  later in the script, either keep a separate reference to it created before
+  the transform, or check `if col not in df.columns: raise ValueError(...)`
+  with a clear message — never let a plain KeyError be the first sign of this.
+- Save CSVs with `to_csv(path, index=False)` unless a required output
+  explicitly needs an index/id column, in which case reset_index() (or
+  otherwise include it as a named column) so the id is an actual column, not
+  just the invisible pandas row index that index=False drops entirely.
 - Set random_state so results repeat.
 - Print every metric you calculate, with a label.
 - You may use: pandas, numpy, scipy, scikit-learn, statsmodels, matplotlib,

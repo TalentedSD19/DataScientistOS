@@ -10,6 +10,17 @@ from backend.config import workspace_dir
 mcp = FastMCP("validation", host="127.0.0.1", port=8013)
 
 
+def _read_csv(p: Path) -> pd.DataFrame:
+    """Match workspace_server.inspect_dataset's encoding fallback. Without
+    this, a CSV the coder wrote correctly (e.g. containing non-ASCII text)
+    can throw a codec error here and get scored as a validation failure even
+    though the run itself was fine."""
+    try:
+        return pd.read_csv(p)
+    except UnicodeError:
+        return pd.read_csv(p, encoding="gbk")
+
+
 def _find(task_id: str, name: str):
     """Find a required output file anywhere in the workspace.
     The prompt may say 'output.csv' while the code saved it in outputs/."""
@@ -43,7 +54,7 @@ def validate_csv(task_id: str, name: str,
         return json.dumps({"valid": False, "issues": [f"{name} was not created"]})
 
     try:
-        df = pd.read_csv(p)
+        df = _read_csv(p)
     except Exception as e:
         return json.dumps({"valid": False, "issues": [f"{name} could not be read: {e}"]})
 
@@ -143,7 +154,7 @@ def validate_text(task_id: str, name: str,
     if p is None:
         return json.dumps({"valid": False, "issues": [f"{name} was not created"]})
 
-    text = p.read_text(errors="replace")
+    text = p.read_text(encoding="utf-8", errors="replace")
     issues = []
     for word in (required_keywords or []):
         if word.lower() not in text.lower():
@@ -175,7 +186,7 @@ def validate_manifest(task_id: str, required_outputs: list[str]) -> str:
                 "path": str(p.relative_to(ws))}
         try:
             if p.suffix.lower() == ".csv":
-                df = pd.read_csv(p)
+                df = _read_csv(p)
                 info["rows"] = int(len(df))
                 info["columns"] = list(df.columns)[:50]
             elif p.suffix.lower() in (".png", ".jpg", ".jpeg"):
@@ -189,7 +200,9 @@ def validate_manifest(task_id: str, required_outputs: list[str]) -> str:
 
     manifest = {"required_outputs": required_outputs, "artifacts": artifacts}
     (ws / "state").mkdir(parents=True, exist_ok=True)
-    (ws / "state" / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (ws / "state" / "manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
 
     produced = sum(1 for a in artifacts.values() if a.get("exists"))
     return json.dumps({

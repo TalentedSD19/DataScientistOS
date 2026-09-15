@@ -67,35 +67,31 @@ def file_info(task_id: str, path: str) -> str:
     return json.dumps({"exists": True, "size": p.stat().st_size, "type": p.suffix})
 
 
-@mcp.tool()
-def inspect_dataset(task_id: str, path: str) -> str:
-    """Look at a data file before writing any code: shape, column names, types,
-    missing values, first few rows. This is what stops the model from inventing
-    column names that don't exist."""
+def _inspect_dataset(task_id: str, path: str) -> dict:
     p = _resolve(task_id, path)
     if not p.exists():
-        return json.dumps({"error": "file not found", "path": path})
+        return {"error": "file not found", "path": path}
 
     kind = p.suffix.lower()
 
     # ---- Excel ----
     if kind in (".xlsx", ".xls"):
         book = pd.ExcelFile(p)
-        return json.dumps({
+        return {
             "type": "excel",
             "sheets": book.sheet_names,
             "preview": {
                 s: book.parse(s, nrows=5).to_dict(orient="records")
                 for s in book.sheet_names[:5]
             },
-        }, default=str)
+        }
 
     # ---- JSON ----
     if kind == ".json":
-        return json.dumps({"type": "json", "content": p.read_text()[:4000]})
+        return {"type": "json", "content": p.read_text()[:4000]}
 
-    # ---- CSV / TSV / TXT ----
-    if kind in (".csv", ".tsv", ".txt"):
+    # ---- CSV / TSV ----
+    if kind in (".csv", ".tsv"):
         separator = "\t" if kind == ".tsv" else ","
         try:
             df = pd.read_csv(p, sep=separator)
@@ -104,7 +100,7 @@ def inspect_dataset(task_id: str, path: str) -> str:
             df = pd.read_csv(p, sep=separator, encoding="gbk")
 
         columns = list(df.columns)[:60]
-        profile = {
+        return {
             "type": "csv",
             "rows": int(df.shape[0]),
             "columns": int(df.shape[1]),
@@ -115,9 +111,32 @@ def inspect_dataset(task_id: str, path: str) -> str:
             "head": df.head(5).to_dict(orient="records"),
             "duplicate_rows": int(df.duplicated().sum()),
         }
-        return json.dumps(profile, default=str)
 
-    return json.dumps({"type": "unknown", "size": p.stat().st_size})
+    # ---- Plain text (.txt and anything else readable) ----
+    # Not every .txt is tabular -- Kaggle-style data dictionaries, READMEs, etc.
+    # are prose, so just preview the raw text instead of forcing it through
+    # a CSV parser.
+    if kind == ".txt":
+        try:
+            text = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = p.read_text(encoding="gbk")
+        return {"type": "text", "content": text[:4000]}
+
+    return {"type": "unknown", "size": p.stat().st_size}
+
+
+@mcp.tool()
+def inspect_dataset(task_id: str, path: str) -> str:
+    """Look at a data file before writing any code: shape, column names, types,
+    missing values, first few rows. This is what stops the model from inventing
+    column names that don't exist."""
+    try:
+        return json.dumps(_inspect_dataset(task_id, path), default=str)
+    except Exception as e:
+        # Never let a single unreadable/malformed file kill the whole planning
+        # step -- surface the failure as data instead of an empty/crashed call.
+        return json.dumps({"error": f"{type(e).__name__}: {e}", "path": path})
 
 
 if __name__ == "__main__":

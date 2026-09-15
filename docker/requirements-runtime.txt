@@ -10,3 +10,8 @@ pillow
 joblib
 xgboost
 lightgbm
+tensorflow-cpu
+
+# CPU-only torch wheels (avoids pulling in CUDA/nvidia-* deps)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch

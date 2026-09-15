@@ -58,6 +58,7 @@ logs/
 *.pickle
 *.joblib
 storage/
+plan.md
 
 # Temporary files
 *.tmp
