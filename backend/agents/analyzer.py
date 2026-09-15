@@ -7,19 +7,61 @@ from backend.mcp_client import call
 from backend.config import MAX_DEBUG_ATTEMPTS
 from backend.agents.debugger import fix_code, install_missing_package
 
-PROMPT = """You are an expert data analyst.
-Generate a Python code that loads and describes the content of {filename}.
+PROMPT = """You are an expert data analyst and Python programmer.
 
-# Requirement
-- The file can be either unstructured or structured data.
-- If there is too much structured data, print out just a few examples.
-- Print out essential information. For example, print out all the column names.
-- The Python code should print out the content of {filename}.
-- The code should be a single-file Python program that is self-contained and can be
-  executed as-is.
-- Reply with a single Python code block only.
-- Do not include dummy contents since we will debug if an error occurs.
-- Do not use try: and except: to hide errors. Debugging happens separately."""
+Generate a **single, self-contained Python program** that loads and analyzes the file `{filename}` and prints a concise but comprehensive description of its contents.
+
+### Requirements
+
+1. **File handling**
+
+   * `{filename}` may contain either **structured data** (CSV, Excel, JSON, Parquet, etc.) or **unstructured data** (TXT, Markdown, PDF, logs, etc.).
+   * Detect the file type from its extension and use an appropriate Python library to read it.
+   * The program must work directly with the provided `{filename}` without requiring any manual modification.
+   * Do not create dummy data, placeholder content, or mock files.
+
+2. **For structured data**
+   Print the essential information needed to understand the dataset, including:
+
+   * File name and file type
+   * Number of rows and columns
+   * **All column names**
+   * Data types of all columns
+   * A small sample of records (e.g., first 5 rows)
+   * Basic dataset statistics where appropriate
+   * Missing-value counts for each column
+   * Number of unique values for each column
+   * Any other important structural information that can be obtained efficiently
+
+   If the dataset is very large, **do not print the entire dataset**. Print only representative examples and summaries.
+
+3. **For unstructured data**
+   Print the essential information needed to understand the file, including:
+
+   * File name and file type
+   * File size where available
+   * Number of characters/words/lines where applicable
+   * A representative excerpt from the content
+   * For multi-page documents such as PDFs, include page count and a short excerpt from the beginning rather than dumping the entire document.
+   * Preserve enough information from the excerpt to understand the nature and structure of the content.
+
+4. **Output**
+
+   * Print all important findings clearly using labeled sections.
+   * The program must **print the contents or representative sample of `{filename}`**, not merely metadata about the file.
+   * Avoid excessive output for large files.
+   * Do not truncate important metadata such as column names.
+
+5. **Code requirements**
+
+   * Return **only one Python code block** containing the complete program.
+   * The code must be **self-contained and executable as-is**.
+   * Do not use `try`/`except` blocks to suppress, catch, or hide errors. If something fails, allow the error to be raised normally so it can be debugged.
+   * Do not use dummy data or assume a particular dataset schema.
+   * Keep the implementation robust and general-purpose.
+   * Use standard Python libraries and commonly available data-processing libraries where appropriate.
+   * Do not require command-line arguments unless necessary; use `{filename}` directly in the program.
+"""
 
 
 def _strip_fences(text: str) -> str:

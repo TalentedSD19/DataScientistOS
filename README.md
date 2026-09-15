@@ -126,7 +126,27 @@ curl -X POST http://127.0.0.1:8000/tasks \
 
 Each task gets its own folder under `storage/tasks/<task_id>/workspace/`
 (`input/` for uploaded files, `src/main.py` for the current solution, plus
-whatever the code itself produces) and its own long-lived Docker container.
+whatever the code itself produces) and its own Docker container for the
+duration of the run -- the container is torn down as soon as the task
+finishes, whether it succeeded or failed, so none are left orphaned. The
+final graph state also lands in `workspace/state/state.json`.
+
+## Benchmark suite
+
+`scripts/make_sample.py` generates ten synthetic datasets under `samples/`,
+five of them paired with prompts in `scripts/run_task.py` that progressively
+exercise EDA, ML classification, forecasting, hypothesis testing, and
+multi-file root-cause analysis:
+
+```bash
+uv run python scripts/make_sample.py     # generates samples/*.csv
+uv run python scripts/run_task.py --benchmark        # all 5, in order
+uv run python scripts/run_task.py --benchmark 2      # just task 2 (churn ML)
+```
+
+Tasks 2 (churn ML) and 5 (multi-file root-cause analysis) are the most useful
+for exercising the debugger and the planner/router loop, since they're the
+least likely to succeed on the very first generated script.
 
 ## Layout
 

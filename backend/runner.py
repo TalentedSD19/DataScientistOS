@@ -3,7 +3,8 @@ import uuid
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from backend.graph.graph import build_graph
-from backend.docker_runner import get_or_create
+from backend.docker_runner import get_or_create, destroy
+from backend.workspace import save_state
 from backend.config import ROOT
 
 CHECKPOINTS_DB = str(ROOT / "storage" / "checkpoints.db")
@@ -21,34 +22,43 @@ async def run(task_id: str, prompt: str, input_files: list[str], on_update=None)
     is given, it is also called as (node_name, state_update) after each node,
     so callers like the API can keep a live status for the task.
     """
-    print(f"\n=== DS-STAR task {task_id} ===")
+    print(f"\n=== DataScientistOS task {task_id} ===")
     print(f"query: {prompt}")
     print(f"input files: {', '.join(input_files) or '(none)'}\n")
 
     get_or_create(task_id)  # make sure the task's sandbox container is up
 
-    async with AsyncSqliteSaver.from_conn_string(CHECKPOINTS_DB) as saver:
-        graph = build_graph(checkpointer=saver)
-        state: dict = {
-            "task_id": task_id, "user_prompt": prompt, "input_files": input_files,
-            "step_count": 0, "debug_attempts": 0, "logs": [],
-        }
+    state: dict = {
+        "task_id": task_id, "user_prompt": prompt, "input_files": input_files,
+        "step_count": 0, "debug_attempts": 0, "logs": [],
+    }
 
-        # astream yields one {node_name: partial_update} dict per finished node,
-        # which lets us print progress live instead of waiting for the whole run.
-        async for event in graph.astream(
-            state,
-            config={"configurable": {"thread_id": task_id}, "recursion_limit": 80},
-        ):
-            for node_name, update in event.items():
-                for line in update.get("logs", []):
-                    print(f"  [{node_name}] {line}")
+    try:
+        async with AsyncSqliteSaver.from_conn_string(CHECKPOINTS_DB) as saver:
+            graph = build_graph(checkpointer=saver)
 
-                merged_logs = state.get("logs", []) + update.get("logs", [])
-                state = {**state, **update, "logs": merged_logs}
+            # astream yields one {node_name: partial_update} dict per finished node,
+            # which lets us print progress live instead of waiting for the whole run.
+            async for event in graph.astream(
+                state,
+                config={"configurable": {"thread_id": task_id}, "recursion_limit": 80},
+            ):
+                for node_name, update in event.items():
+                    for line in update.get("logs", []):
+                        print(f"  [{node_name}] {line}")
 
-                if on_update:
-                    on_update(node_name, update)
+                    merged_logs = state.get("logs", []) + update.get("logs", [])
+                    state = {**state, **update, "logs": merged_logs}
+
+                    if on_update:
+                        on_update(node_name, update)
+    finally:
+        # The sandbox is single-use per task: once this loop is done -- whether
+        # it finished cleanly or blew up -- there's nothing left to run in it,
+        # so it must never be left behind as an orphaned container.
+        save_state(task_id, state)
+        destroy(task_id)
+        print(f"  sandbox container removed")
 
     print(f"\n=== task {task_id} finished: verifier={state.get('verifier_status', 'unknown')} ===")
     print(f"workspace: storage/tasks/{task_id}/workspace\n")
