@@ -55,8 +55,7 @@ async def debugger_node(state: dict) -> dict:
         traceback=run.get("stderr") or "",
         data_descriptions=descriptions,
     )
-    await call("workspace", "write_file",
-               task_id=task_id, path="src/main.py", content=code)
+    await call("write_file", task_id=task_id, path="src/main.py", content=code)
 
     attempts = state.get("debug_attempts", 0) + 1
     return {

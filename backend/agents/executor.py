@@ -21,7 +21,7 @@ def _summarise_error(result: dict) -> dict:
 
 
 async def execute_node(state: dict) -> dict:
-    raw = await call("execution", "execute_file",
+    raw = await call("execute_file",
                      task_id=state["task_id"], path="src/main.py",
                      timeout=EXEC_TIMEOUT)
     result = json.loads(raw) if isinstance(raw, str) else raw

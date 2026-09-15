@@ -76,7 +76,6 @@ async def coder_node(state: dict) -> dict:
     response = await llm.ainvoke(message)
     code = _strip_fences(response.content)
 
-    await call("workspace", "write_file",
-               task_id=task_id, path="src/main.py", content=code)
+    await call("write_file", task_id=task_id, path="src/main.py", content=code)
 
     return {"code": code, "logs": [f"coder: {mode}, {len(code)} characters"]}

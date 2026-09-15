@@ -4,12 +4,10 @@ import uuid
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from backend.config import workspace_dir
 from backend.workspace import create_workspace, list_workspace_files
-from backend.docker_runner import get_or_create
-from backend.graph.graph import build_graph
+from backend.runner import run as run_task
 
 app = FastAPI(title="DataScientistOS")
 
@@ -43,35 +41,23 @@ async def create_task(prompt: str = Form(...),
     return {"task_id": task_id, "status": "queued"}
 
 
+def _record_update(task_id: str, node_name: str, update: dict) -> None:
+    """Mirror one graph step into the TASKS dict so /tasks/{id} has live status."""
+    TASKS[task_id]["status"] = node_name
+    TASKS[task_id]["logs"].extend(update.get("logs", []))
+    for key in ("plan", "code", "execution_result", "verifier_status"):
+        if update.get(key):
+            TASKS[task_id][key] = update[key]
+
+
 async def _run_in_background(task_id: str, prompt: str, names: list[str]):
     TASKS[task_id]["status"] = "running"
-    get_or_create(task_id)
-
     try:
-        async with AsyncSqliteSaver.from_conn_string("storage/checkpoints.db") as saver:
-            graph = build_graph(checkpointer=saver)
-
-            # astream gives us updates as each agent finishes, so the UI can show progress
-            async for event in graph.astream(
-                {"task_id": task_id, "user_prompt": prompt, "input_files": names,
-                 "step_count": 0, "debug_attempts": 0, "logs": []},
-                config={"configurable": {"thread_id": task_id},
-                        "recursion_limit": 80},
-            ):
-                for node_name, update in event.items():
-                    TASKS[task_id]["status"] = node_name
-                    TASKS[task_id]["logs"].extend(update.get("logs", []))
-                    if update.get("plan"):
-                        TASKS[task_id]["plan"] = update["plan"]
-                    if update.get("code"):
-                        TASKS[task_id]["code"] = update["code"]
-                    if update.get("execution_result"):
-                        TASKS[task_id]["execution_result"] = update["execution_result"]
-                    if update.get("verifier_status"):
-                        TASKS[task_id]["verifier_status"] = update["verifier_status"]
-
+        await run_task(
+            task_id, prompt, names,
+            on_update=lambda node_name, update: _record_update(task_id, node_name, update),
+        )
         TASKS[task_id]["status"] = "done"
-
     except Exception as e:
         TASKS[task_id]["status"] = "error"
         TASKS[task_id]["logs"].append(f"error: {e}")

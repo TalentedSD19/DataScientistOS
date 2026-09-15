@@ -41,8 +41,8 @@ async def _describe_one_file(task_id: str, file_name: str) -> str:
     code = _strip_fences(response.content)
 
     for attempt in range(MAX_DEBUG_ATTEMPTS + 1):
-        await call("workspace", "write_file", task_id=task_id, path=script_path, content=code)
-        raw = await call("execution", "execute_file", task_id=task_id, path=script_path)
+        await call("write_file", task_id=task_id, path=script_path, content=code)
+        raw = await call("execute_file", task_id=task_id, path=script_path)
         result = json.loads(raw) if isinstance(raw, str) else raw
 
         if result.get("exit_code") == 0:

@@ -32,9 +32,9 @@ MEM_LIMIT = os.getenv("MEM_LIMIT", "6g")
 # Internet is OFF inside the sandbox unless you turn it on
 ALLOW_NETWORK = os.getenv("ALLOW_NETWORK", "false").lower() == "true"
 
-# Addresses of the two tool servers: a place to write scripts, and a sandbox to run them
-MCP_WORKSPACE_URL = os.getenv("MCP_WORKSPACE_URL", "http://127.0.0.1:8011/mcp")
-MCP_EXEC_URL = os.getenv("MCP_EXEC_URL", "http://127.0.0.1:8012/mcp")
+# The single MCP server (mcp_servers/server.py) that exposes every tool the
+# agents use: write_file and execute_file.
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8011/mcp")
 
 
 def task_dir(task_id: str) -> Path:

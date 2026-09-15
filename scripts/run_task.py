@@ -1,70 +1,24 @@
+"""CLI entry point: run one DS-STAR task from the command line.
+
+Usage:
+    python scripts/run_task.py "your question about the data" input/data.csv [more files...]
+
+All progress is printed live by backend.runner.run as the agent works.
+"""
+
 import asyncio
 import sys
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-from backend.graph.graph import build_graph
-from backend.workspace import create_workspace, add_input_file, list_workspace_files
-from backend.docker_runner import get_or_create, destroy
-
-
-async def run(prompt: str, files: list[str], keep_container: bool = True) -> dict:
-    task_id = uuid.uuid4().hex[:8]
-    print(f"task id: {task_id}\n")
-
-    # Set up the folders, copy the data in, start the sandbox
-    create_workspace(task_id)
-    names = [add_input_file(task_id, f) for f in files]
-    get_or_create(task_id)
-
-    # The checkpointer saves progress, so a crash doesn't lose everything
-    async with AsyncSqliteSaver.from_conn_string("storage/checkpoints.db") as saver:
-        graph = build_graph(checkpointer=saver)
-
-        final_state = await graph.ainvoke(
-            {
-                "task_id": task_id,
-                "user_prompt": prompt,
-                "input_files": names,
-                "step_count": 0,
-                "debug_attempts": 0,
-                "logs": [],
-            },
-            config={
-                "configurable": {"thread_id": task_id},
-                "recursion_limit": 80,   # safety net so it can never spin forever
-            },
-        )
-
-    print("--- WHAT HAPPENED ---")
-    for line in final_state.get("logs", []):
-        print(" ", line)
-
-    print("\n--- PLAN ---")
-    for step in final_state.get("plan", []):
-        print(f"  {step['step_id']}. {step['goal']}")
-    print(f"  verifier: {final_state.get('verifier_status')}")
-
-    print("\n--- ANSWER (final script's stdout) ---")
-    print(final_state.get("execution_result", {}).get("stdout", "(none)"))
-
-    print("\n--- FILES ---")
-    for f in list_workspace_files(task_id):
-        print(" ", f)
-
-    print(f"\nfolder: storage\\tasks\\{task_id}\\workspace")
-
-    if not keep_container:
-        destroy(task_id)
-
-    return final_state
-
+from backend.runner import run_new_task
 
 if __name__ == "__main__":
-    user_prompt = sys.argv[1]
-    input_files = sys.argv[2:]
-    asyncio.run(run(user_prompt, input_files))
+    if len(sys.argv) < 2:
+        print("usage: python scripts/run_task.py \"<prompt>\" [file ...]")
+        sys.exit(1)
+
+    prompt = sys.argv[1]
+    files = sys.argv[2:]
+    asyncio.run(run_new_task(prompt, files))
