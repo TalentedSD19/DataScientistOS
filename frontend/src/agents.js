@@ -17,6 +17,7 @@ export const AGENTS = [
   { id: 'debugger', label: 'Debugger', color: '#fb923c', description: 'fixing the code that just crashed' },
   { id: 'verifier', label: 'Verifier', color: '#22d3ee', description: 'checking whether the answer is complete' },
   { id: 'router', label: 'Router', color: '#f472b6', description: 'deciding whether to add a step or backtrack' },
+  { id: 'reporter', label: 'Reporter', color: '#2dd4bf', description: 'writing a short summary of what happened' },
 ]
 
 export const AGENT_BY_ID = Object.fromEntries([SANDBOX, ...AGENTS].map((a) => [a.id, a]))

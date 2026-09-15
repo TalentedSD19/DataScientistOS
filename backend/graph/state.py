@@ -18,5 +18,6 @@ class DSStarState(TypedDict, total=False):
     debug_attempts: int         # resets whenever the planner adds a new step
 
     verifier_status: str        # SUFFICIENT / INSUFFICIENT
+    report: str                 # the reporter's final markdown summary
 
     logs: Annotated[list[str], add]

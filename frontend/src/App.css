@@ -239,6 +239,45 @@ main {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* --- report --- */
+
+.report-panel {
+  margin-bottom: 18px;
+}
+
+.report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.report-header .panel-title {
+  margin: 0;
+}
+
+.report h3 {
+  font-size: 15px;
+  margin: 16px 0 6px;
+}
+
+.report h3:first-child {
+  margin-top: 4px;
+}
+
+.report p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.report ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
 /* --- pipeline graph --- */
 
 .graph-wrap {
@@ -246,8 +285,8 @@ main {
 }
 
 .graph-caption {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 14px;
+  font-size: 14.5px;
   color: var(--text-dim);
 }
 
@@ -269,12 +308,12 @@ main {
 
 .graph-legend {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   color: var(--text-dim);
 }
 

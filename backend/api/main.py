@@ -48,7 +48,7 @@ def _record_update(task_id: str, node_name: str, update: dict) -> None:
     """Mirror one graph step into the TASKS dict so /tasks/{id} has live status."""
     TASKS[task_id]["status"] = node_name
     TASKS[task_id]["logs"].extend(update.get("logs", []))
-    for key in ("plan", "code", "execution_result", "verifier_status"):
+    for key in ("plan", "code", "execution_result", "verifier_status", "report"):
         if update.get(key):
             TASKS[task_id][key] = update[key]
 
@@ -125,5 +125,6 @@ def get_result(task_id: str):
         "plan": task.get("plan"),
         "code": task.get("code"),
         "answer": run.get("stdout"),
+        "report": task.get("report"),
         "artifacts": list_workspace_files(task_id),
     }

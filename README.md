@@ -28,6 +28,7 @@ flowchart TD
         Verifier["Verifier<br/>LLM judge: is the output<br/>enough to answer?"]
         VerifierDecision{"Verifier status?"}
         Router["Router<br/>ADD_STEP or BACKTRACK"]
+        Reporter["Reporter<br/>Writes report.md:<br/>answer, steps, files"]
 
         Analyzer --> Retriever
         Retriever --> Planner
@@ -56,13 +57,15 @@ flowchart TD
         MCP ==> DOCKER
     end
 
-    GiveUp(["Give up<br/>Debug attempts exhausted"])
+    GiveUp(["Gave up<br/>No verified answer"])
     Done(["Done<br/>Answer + artifacts"])
 
     START --> Analyzer
-    ExecDecision -- "non-zero, retries exhausted" --> GiveUp
-    VerifierDecision -- "SUFFICIENT" --> Done
-    VerifierDecision -- "steps exhausted" --> Done
+    ExecDecision -- "non-zero, retries exhausted" --> Reporter
+    VerifierDecision -- "SUFFICIENT" --> Reporter
+    VerifierDecision -- "steps exhausted" --> Reporter
+    Reporter -- "SUFFICIENT" --> Done
+    Reporter -- "otherwise" --> GiveUp
 
     Analyzer -. "inspect files" .-> MCP
     Executor -. "run code" .-> MCP
@@ -76,7 +79,7 @@ flowchart TD
     classDef mcp fill:#efe6ff,stroke:#7b4bd6,stroke-width:1px,color:#111111
     classDef docker fill:#e3f6fc,stroke:#1d8fbf,stroke-width:1px,color:#111111
 
-    class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router agent
+    class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router,Reporter agent
     class ExecDecision,VerifierDecision decision
     class START,Done success
     class GiveUp failure
@@ -94,7 +97,8 @@ flowchart TD
 
 Solid arrows are the fixed pipeline; the loops are the interesting part: **Coder → Executor → Debugger → Executor**
 retries a crashing script, and **Verifier → Router → Planner** is DS-STAR's plan-refinement
-loop, which can either add a step or backtrack to redo one that turned out wrong.
+loop, which can either add a step or backtrack to redo one that turned out wrong. However the run
+ends, **Reporter** runs once at the end to write a short, human-readable summary.
 
 Each agent is a small, single-purpose LLM call under `backend/agents/`, wired
 together as a LangGraph state machine in `backend/graph/graph.py`. The full
@@ -117,6 +121,9 @@ state each agent reads and writes is defined in `backend/graph/state.py`.
   are actually sufficient to answer the query.
 - **Router** — when the verifier says no, decides whether to add a new step
   or backtrack and redo a step that turned out to be wrong.
+- **Reporter** — runs once, however the run ends. Writes `report.md`: a
+  direct answer to the query, the steps taken, and the files created, or,
+  if it didn't work out, a plain explanation of what went wrong.
 
 ## Tools
 
@@ -179,14 +186,31 @@ curl -X POST http://127.0.0.1:8000/tasks \
   -F "prompt=train a model to predict Outcome" \
   -F "files=@samples/data.csv"
 # then: GET /tasks/{task_id}, /tasks/{task_id}/logs, /tasks/{task_id}/result
+# POST /tasks/{task_id}/stop cancels a run in progress
 ```
+
+Or from a browser, with the React UI under `frontend/` (see below).
 
 Each task gets its own folder under `storage/tasks/<task_id>/workspace/`
 (`input/` for uploaded files, `src/main.py` for the current solution, plus
-whatever the code itself produces) and its own Docker container for the
-duration of the run -- the container is torn down as soon as the task
-finishes, whether it succeeded or failed, so none are left orphaned. The
-final graph state also lands in `workspace/state/state.json`.
+whatever the code itself produces, including the reporter's `report.md`)
+and its own Docker container for the duration of the run -- the container is
+torn down as soon as the task finishes, whether it succeeded, failed, or was
+stopped, so none are left orphaned. The final graph state also lands in
+`workspace/state/state.json`.
+
+## Frontend
+
+A small React UI (`frontend/`) lets you run a task from the browser: upload
+files, type a prompt, watch the pipeline diagram light up as each agent
+runs, and read or download the report and any files created when it's done.
+It talks to the FastAPI server above, so start that first.
+
+```bash
+cd frontend
+npm install     # first time only
+npm run dev
+```
 
 ## Benchmark suite
 
@@ -227,4 +251,6 @@ docker/
 scripts/
   run_task.py    CLI entry point
   make_sample.py regenerates samples/data.csv
+frontend/
+  src/           the React UI: upload form, pipeline diagram, logs, report
 ```

@@ -11,6 +11,7 @@ def get_llm(role: str, temperature: float = 0.0, max_tokens: int | None = None):
         "verifier":  os.getenv("VERIFIER_MODEL", "gpt-4o"),
         "router":    os.getenv("ROUTER_MODEL", "gpt-4o-mini"),
         "debugger":  os.getenv("DEBUGGER_MODEL", "gpt-4o"),
+        "reporter":  os.getenv("REPORTER_MODEL", "gpt-4o-mini"),
     }.get(role, "gpt-4o")
     kwargs = {"model": model, "temperature": temperature}
     if max_tokens is not None:

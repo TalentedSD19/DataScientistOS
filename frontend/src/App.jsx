@@ -101,10 +101,45 @@ function ResultBanner({ outcome, task }) {
   )
 }
 
+// Turns the reporter's markdown into a few simple blocks. It only ever
+// writes headings ("## "), bullet lists ("- ") and plain lines, so a full
+// markdown parser would be overkill.
+function parseReport(text) {
+  const blocks = []
+  let list = null
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line) { list = null; continue }
+    if (line.startsWith('## ')) {
+      list = null
+      blocks.push({ type: 'heading', text: line.slice(3) })
+    } else if (line.startsWith('- ')) {
+      if (!list) { list = { type: 'list', items: [] }; blocks.push(list) }
+      list.items.push(line.slice(2))
+    } else {
+      list = null
+      blocks.push({ type: 'p', text: line })
+    }
+  }
+  return blocks
+}
+
+function Report({ text }) {
+  return (
+    <div className="report">
+      {parseReport(text).map((block, i) => {
+        if (block.type === 'heading') return <h3 key={i}>{block.text}</h3>
+        if (block.type === 'list') return <ul key={i}>{block.items.map((item, j) => <li key={j}>{item}</li>)}</ul>
+        return <p key={i}>{block.text}</p>
+      })}
+    </div>
+  )
+}
+
 // Files worth showing to the user: what the agents produced, not the
-// files they were given or internal bookkeeping.
+// files they were given, our own bookkeeping, or the report (shown above).
 function isDownloadable(path) {
-  return !path.startsWith('input/') && !path.startsWith('state/')
+  return !path.startsWith('input/') && !path.startsWith('state/') && path !== 'report.md'
 }
 
 function ArtifactList({ taskId, files }) {
@@ -208,6 +243,18 @@ export default function App() {
       </header>
 
       <ResultBanner outcome={outcome} task={task || {}} />
+
+      {finished && task.report && (
+        <div className="panel report-panel">
+          <div className="report-header">
+            <h2 className="panel-title">Report</h2>
+            <a className="btn btn-secondary" href={`${API}/tasks/${taskId}/artifacts/report.md`} download>
+              Download report.md
+            </a>
+          </div>
+          <Report text={task.report} />
+        </div>
+      )}
 
       <main>
         <section className="left">
