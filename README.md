@@ -10,37 +10,50 @@ queries (not the DS-STAR+ extension for open-ended report writing).
 DS-STAR answers a query about a set of data files by looping through five
 agents until an LLM judge decides the current plan and code are sufficient:
 
+```mermaid
+flowchart TD
+    START(["input files + query"]) --> Analyzer
+
+    Analyzer["🔍 Analyzer<br/><small>describes every file:<br/>schema, sample rows, ...</small>"]
+    Retriever["📌 Retriever<br/><small>keeps top-K relevant files<br/>only above 100 input files</small>"]
+    Planner["🧠 Planner<br/><small>proposes one small,<br/>concrete next step</small>"]
+    Coder["💻 Coder<br/><small>writes the step into<br/>src/main.py</small>"]
+    Executor["▶️ Executor<br/><small>runs main.py in the<br/>task's Docker sandbox</small>"]
+    Debugger["🛠️ Debugger<br/><small>pip installs missing pkgs,<br/>else fixes the traceback</small>"]
+    Verifier["✅ Verifier<br/><small>LLM judge: is the plan + code<br/>+ output enough to answer?</small>"]
+    Router["🔀 Router<br/><small>ADD_STEP, or BACKTRACK<br/>to redo a bad step</small>"]
+
+    ExecDecision{"exit code?"}
+    VerifierDecision{"verifier_status?"}
+
+    GiveUp(["give up<br/><small>debug attempts exhausted</small>"])
+    Done(["done<br/><small>answer + artifacts</small>"])
+
+    Analyzer --> Retriever --> Planner --> Coder --> Executor
+    Executor --> ExecDecision
+    ExecDecision -->|"0 (success)"| Verifier
+    ExecDecision -->|"nonzero, attempts < MAX_DEBUG_ATTEMPTS"| Debugger
+    ExecDecision -->|"nonzero, attempts exhausted"| GiveUp
+    Debugger --> Executor
+
+    Verifier --> VerifierDecision
+    VerifierDecision -->|"SUFFICIENT"| Done
+    VerifierDecision -->|"INSUFFICIENT, step_count < MAX_STEPS"| Router
+    VerifierDecision -->|"INSUFFICIENT, steps exhausted"| Done
+    Router -->|"back to Planner"| Planner
+
+    classDef agent fill:#e0ecff,stroke:#3b6fd6,stroke-width:1px,color:#1a1a1a;
+    classDef decision fill:#fff3cd,stroke:#d6a53b,stroke-width:1px,color:#1a1a1a;
+    classDef terminal fill:#dff5e1,stroke:#3bb35a,stroke-width:1px,color:#1a1a1a;
+
+    class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router agent;
+    class ExecDecision,VerifierDecision decision;
+    class START,GiveUp,Done terminal;
 ```
-                 ┌─────────────┐
-   input files → │  Analyzer   │  describes every file (schema, sample rows, ...)
-                 └──────┬──────┘
-                        ▼
-                 ┌─────────────┐
-                 │  Retriever  │  picks the most relevant files (only kicks in
-                 └──────┬──────┘  above 100 input files; see backend/config.py)
-                        │
-          ┌─────────────▼─────────────┐
-          │            Planner        │◄────────────┐
-          │  proposes the next step   │              │
-          └─────────────┬─────────────┘              │
-                         ▼                            │
-                 ┌─────────────┐   crash    ┌─────────────┐
-                 │    Coder    │───────────►│  Debugger   │
-                 │ writes code │            │  fixes it   │
-                 └──────┬──────┘            └──────┬──────┘
-                        ▼         ▲                 │
-                 ┌─────────────┐  └─────────────────┘
-                 │  Executor   │  runs the script in Docker
-                 └──────┬──────┘
-                        ▼ success
-                 ┌─────────────┐  insufficient  ┌─────────────┐
-                 │  Verifier   │───────────────►│   Router    │
-                 │ judges plan │                │ add step or │
-                 └──────┬──────┘                │  backtrack  │
-                         │ sufficient            └──────┬──────┘
-                         ▼                              │
-                       done ◄────────────────────────────┘ (back to Planner)
-```
+
+Solid arrows are the fixed pipeline; the loops are the interesting part: **Coder → Executor → Debugger → Executor**
+retries a crashing script, and **Verifier → Router → Planner** is DS-STAR's plan-refinement
+loop, which can either add a step or backtrack to redo one that turned out wrong.
 
 Each agent is a small, single-purpose LLM call under `backend/agents/`, wired
 together as a LangGraph state machine in `backend/graph/graph.py`. The full
