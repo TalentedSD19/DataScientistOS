@@ -3,68 +3,45 @@ import json
 from backend.llm import get_llm
 from backend.mcp_client import call
 
-SYSTEM = """You write complete, self-contained Python data science scripts.
+FIRST_STEP = """# Given data
+{descriptions}
 
-Rules you must follow:
-- Write ONE file that runs from top to bottom. `python src/main.py` must work.
-- The working folder is /workspace. Input files are in input/.
-- Save every requested output with the EXACT file name asked for. If the name has a
-  folder in it, create the folder first with
-  `os.makedirs(os.path.dirname(path) or ".", exist_ok=True)` — the `or "."` matters:
-  a bare file name with no folder makes os.path.dirname(path) return '', and
-  os.makedirs('', exist_ok=True) raises FileNotFoundError.
-- For charts use matplotlib, never call plt.show(), always plt.savefig(...) then plt.close().
-- Only use column names from the data profile you are given.
-- After any step that renames, drops, or selects columns (train/test split,
-  feature selection, dropna on a subset, etc.), a column you used before that
-  step may no longer exist. Before referencing a target/label/id column again
-  later in the script, either keep a separate reference to it created before
-  the transform, or check `if col not in df.columns: raise ValueError(...)`
-  with a clear message — never let a plain KeyError be the first sign of this.
-- Save CSVs with `to_csv(path, index=False)` unless a required output
-  explicitly needs an index/id column, in which case reset_index() (or
-  otherwise include it as a named column) so the id is an actual column, not
-  just the invisible pandas row index that index=False drops entirely.
-- Set random_state so results repeat.
-- Print every metric you calculate, with a label.
-- You may use: pandas, numpy, scipy, scikit-learn, statsmodels, matplotlib,
-  seaborn, openpyxl, pillow, joblib, xgboost, lightgbm.
-- There is no internet.
-- Reply with Python code only. No explanation, no markdown fences.
+# Plan
+{plan}
+
+# Your task
+- Implement the plan with the given data.
+- Reply with a single Python code block only, no explanation.
+- The script must run as `python src/main.py`. Input files are under input/.
+- Print every result you compute, with a label, so it shows up in stdout.
 """
 
-FIRST_DRAFT = """TASK SPECIFICATION:
-{spec}
+NEXT_STEP = """# Given data
+{descriptions}
 
-DATA PROFILE:
-{profiles}
-
-ORIGINAL REQUEST:
-{prompt}
-
-Write src/main.py."""
-
-PATCH = """Your previous script did not pass the checks.
-
-CURRENT CODE:
+# Base code
+```python
 {code}
+```
 
-WHAT HAPPENED WHEN IT RAN:
-exit code: {exit_code}
-error output: {stderr}
+# Previous plans
+{previous_plan}
 
-PROBLEMS FOUND:
-{issues}
+# Current plan to implement
+{step}
 
-WHAT TO DO:
-{instruction}
-
-Fix only what is broken. Keep everything that already worked.
-Reply with the complete corrected src/main.py."""
+# Your task
+- Implement the current plan with the given data.
+- The implementation should be done based on the base code, which already implements the
+  previous plans.
+- If a previous step turns out to be wrong given the current plan, fix it here rather
+  than building on top of it.
+- Reply with the complete, updated src/main.py as a single Python code block, no explanation.
+- Print every result you compute, with a label, so it shows up in stdout.
+"""
 
 
 def _strip_fences(text: str) -> str:
-    """Remove ```python ... ``` if the model adds it anyway."""
     text = text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
@@ -73,35 +50,33 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-async def code_node(state: dict) -> dict:
+async def coder_node(state: dict) -> dict:
     task_id = state["task_id"]
     llm = get_llm("coder")
 
-    # If there is already code AND a failed check, we patch instead of rewriting
-    if state.get("code") and state.get("validation"):
-        run = state.get("execution_result", {})
-        message = PATCH.format(
-            code=state["code"],
-            exit_code=run.get("exit_code"),
-            stderr=(run.get("stderr") or "")[-2000:],
-            issues=json.dumps(state["validation"].get("issues", []), indent=2),
-            instruction=state["validation"].get("repair_instruction", ""),
-        )
-        mode = "patch"
-    else:
-        message = FIRST_DRAFT.format(
-            spec=json.dumps(state["spec"], indent=2),
-            profiles=json.dumps(state.get("dataset_profiles", {}), indent=2)[:8000],
-            prompt=state["user_prompt"],
-        )
-        mode = "first draft"
+    plan = state.get("plan", [])
+    relevant = state.get("relevant_files") or state.get("input_files", [])
+    descriptions = {f: state.get("data_descriptions", {}).get(f, "") for f in relevant}
 
-    response = await llm.ainvoke([("system", SYSTEM), ("user", message)])
+    if state.get("code"):
+        message = NEXT_STEP.format(
+            descriptions=json.dumps(descriptions, indent=2)[:6000],
+            code=state["code"],
+            previous_plan="\n".join(f"{s['step_id']}. {s['goal']}" for s in plan[:-1]),
+            step=plan[-1]["goal"] if plan else state["user_prompt"],
+        )
+        mode = "extend"
+    else:
+        message = FIRST_STEP.format(
+            descriptions=json.dumps(descriptions, indent=2)[:6000],
+            plan="\n".join(f"{s['step_id']}. {s['goal']}" for s in plan) or state["user_prompt"],
+        )
+        mode = "first step"
+
+    response = await llm.ainvoke(message)
     code = _strip_fences(response.content)
 
-    # Save it into the workspace so the sandbox can run it
     await call("workspace", "write_file",
                task_id=task_id, path="src/main.py", content=code)
 
-    return {"code": code, "status": "executing",
-            "logs": [f"coder: {mode}, {len(code)} characters"]}
+    return {"code": code, "logs": [f"coder: {mode}, {len(code)} characters"]}

@@ -2,21 +2,21 @@ from typing import Annotated, TypedDict
 from operator import add
 
 
-class TaskState(TypedDict, total=False):
+class DSStarState(TypedDict, total=False):
     task_id: str
     user_prompt: str
     input_files: list[str]
 
-    dataset_profiles: dict     # file name -> what inspect_dataset found
-    spec: dict                 # the TaskSpec as a plain dict
+    data_descriptions: dict     # file name -> description text, from exec(analyzer script)
+    relevant_files: list[str]   # which files the planner/coder/router should look at
 
-    code: str                  # the current src/main.py
-    execution_result: dict     # exit code, output, new files
-    validation: dict           # filled in later, Phase 4
+    plan: list[dict]            # [{"step_id": int, "goal": str}, ...] taken so far
+    step_count: int             # every step ever planned, even ones later backtracked past
 
-    generated_files: list[str]
-    logs: Annotated[list[str], add]   # 'add' means new log lines get appended
+    code: str                   # the current solution script, cumulative across steps
+    execution_result: dict      # exit code, stdout/stderr, files created
+    debug_attempts: int         # resets whenever the planner adds a new step
 
-    retry_count: int
-    status: str
-    final_report: str
+    verifier_status: str        # SUFFICIENT / INSUFFICIENT
+
+    logs: Annotated[list[str], add]

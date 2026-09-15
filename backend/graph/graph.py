@@ -1,61 +1,66 @@
 from langgraph.graph import StateGraph, START, END
 
-from backend.graph.state import TaskState
-from backend.agents.manager import manager_node, manager_router
-from backend.agents.planner import plan_node
-from backend.agents.coder import code_node
+from backend.graph.state import DSStarState
+from backend.agents.analyzer import analyzer_node
+from backend.agents.retriever import retriever_node
+from backend.agents.planner import planner_node
+from backend.agents.coder import coder_node
 from backend.agents.executor import execute_node
-from backend.agents.validator import validate_node
-from backend.agents.reporter import report_node
-from backend.config import MAX_REPAIR_ATTEMPTS
+from backend.agents.debugger import debugger_node
+from backend.agents.verifier import verifier_node
+from backend.agents.router import router_node
+from backend.config import MAX_DEBUG_ATTEMPTS, MAX_STEPS
 
 
-def validator_router(state: dict) -> str:
-    """After checking: finish, try again, or stop trying."""
-    verdict = state.get("validation", {})
+def after_execution(state: dict) -> str:
+    """Did the script run? A crash goes to the debugger, not the verifier -- a runtime
+    error is a coding mistake, not a sign the plan is wrong."""
+    run = state.get("execution_result", {})
+    if run.get("exit_code") == 0:
+        return "ok"
+    if state.get("debug_attempts", 0) < MAX_DEBUG_ATTEMPTS:
+        return "debug"
+    return "give_up"
 
-    if verdict.get("status") == "PASS":
-        return "pass"
-    if state.get("retry_count", 0) >= MAX_REPAIR_ATTEMPTS:
-        return "abort"
-    return "repair"
+
+def after_verifier(state: dict) -> str:
+    """Finished (or out of rounds), or does the plan need another step / a backtrack?"""
+    if state.get("verifier_status") == "SUFFICIENT":
+        return "done"
+    if state.get("step_count", 0) >= MAX_STEPS:
+        return "done"
+    return "insufficient"
 
 
 def build_graph(checkpointer=None):
-    graph = StateGraph(TaskState)
+    graph = StateGraph(DSStarState)
 
-    # Every agent is a node
-    graph.add_node("manager", manager_node)
-    graph.add_node("planner", plan_node)
-    graph.add_node("coder", code_node)
+    graph.add_node("analyzer", analyzer_node)
+    graph.add_node("retriever", retriever_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("coder", coder_node)
     graph.add_node("executor", execute_node)
-    graph.add_node("validator", validate_node)
-    graph.add_node("reporter", report_node)
+    graph.add_node("debugger", debugger_node)
+    graph.add_node("verifier", verifier_node)
+    graph.add_node("router", router_node)
 
-    # Start at the manager
-    graph.add_edge(START, "manager")
-
-    # The manager picks where to go
-    graph.add_conditional_edges("manager", manager_router, {
-        "plan": "planner",
-        "code": "coder",
-        "report": "reporter",
-    })
-
-    # Planning always returns to the manager
-    graph.add_edge("planner", "manager")
-
-    # Code is always run, and a run is always checked
+    graph.add_edge(START, "analyzer")
+    graph.add_edge("analyzer", "retriever")
+    graph.add_edge("retriever", "planner")
+    graph.add_edge("planner", "coder")
     graph.add_edge("coder", "executor")
-    graph.add_edge("executor", "validator")
 
-    # This is the repair loop
-    graph.add_conditional_edges("validator", validator_router, {
-        "pass": "reporter",
-        "repair": "manager",   # manager bumps the counter, sends it back to coder
-        "abort": "reporter",
+    graph.add_conditional_edges("executor", after_execution, {
+        "ok": "verifier",
+        "debug": "debugger",
+        "give_up": END,
     })
+    graph.add_edge("debugger", "executor")
 
-    graph.add_edge("reporter", END)
+    graph.add_conditional_edges("verifier", after_verifier, {
+        "done": END,
+        "insufficient": "router",
+    })
+    graph.add_edge("router", "planner")
 
     return graph.compile(checkpointer=checkpointer)

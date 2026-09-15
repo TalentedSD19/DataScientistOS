@@ -54,17 +54,23 @@ async def _run_in_background(task_id: str, prompt: str, names: list[str]):
             # astream gives us updates as each agent finishes, so the UI can show progress
             async for event in graph.astream(
                 {"task_id": task_id, "user_prompt": prompt, "input_files": names,
-                 "retry_count": 0, "status": "planning", "logs": []},
+                 "step_count": 0, "debug_attempts": 0, "logs": []},
                 config={"configurable": {"thread_id": task_id},
-                        "recursion_limit": 60},
+                        "recursion_limit": 80},
             ):
                 for node_name, update in event.items():
-                    TASKS[task_id]["status"] = update.get("status", node_name)
+                    TASKS[task_id]["status"] = node_name
                     TASKS[task_id]["logs"].extend(update.get("logs", []))
-                    if update.get("validation"):
-                        TASKS[task_id]["validation"] = update["validation"]
-                    if update.get("final_report"):
-                        TASKS[task_id]["report"] = update["final_report"]
+                    if update.get("plan"):
+                        TASKS[task_id]["plan"] = update["plan"]
+                    if update.get("code"):
+                        TASKS[task_id]["code"] = update["code"]
+                    if update.get("execution_result"):
+                        TASKS[task_id]["execution_result"] = update["execution_result"]
+                    if update.get("verifier_status"):
+                        TASKS[task_id]["verifier_status"] = update["verifier_status"]
+
+        TASKS[task_id]["status"] = "done"
 
     except Exception as e:
         TASKS[task_id]["status"] = "error"
@@ -101,11 +107,14 @@ def download_artifact(task_id: str, path: str):
 
 @app.get("/tasks/{task_id}/result")
 def get_result(task_id: str):
-    """Everything in one call, for when the task is finished."""
+    """Everything in one call: the final code, its output, and the plan that led there."""
     task = TASKS.get(task_id, {})
+    run = task.get("execution_result", {})
     return {
         "status": task.get("status"),
-        "summary": task.get("report"),
-        "validation": task.get("validation"),
+        "verifier_status": task.get("verifier_status"),
+        "plan": task.get("plan"),
+        "code": task.get("code"),
+        "answer": run.get("stdout"),
         "artifacts": list_workspace_files(task_id),
     }

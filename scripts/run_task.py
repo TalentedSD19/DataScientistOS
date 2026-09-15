@@ -30,13 +30,13 @@ async def run(prompt: str, files: list[str], keep_container: bool = True) -> dic
                 "task_id": task_id,
                 "user_prompt": prompt,
                 "input_files": names,
-                "retry_count": 0,
-                "status": "planning",
+                "step_count": 0,
+                "debug_attempts": 0,
                 "logs": [],
             },
             config={
                 "configurable": {"thread_id": task_id},
-                "recursion_limit": 60,   # safety net so it can never spin forever
+                "recursion_limit": 80,   # safety net so it can never spin forever
             },
         )
 
@@ -44,14 +44,13 @@ async def run(prompt: str, files: list[str], keep_container: bool = True) -> dic
     for line in final_state.get("logs", []):
         print(" ", line)
 
-    print("\n--- CHECKS ---")
-    verdict = final_state.get("validation", {})
-    print(f"  status: {verdict.get('status')}   score: {verdict.get('final_score')}")
-    for issue in verdict.get("issues", []):
-        print(f"  - {issue['message']}")
+    print("\n--- PLAN ---")
+    for step in final_state.get("plan", []):
+        print(f"  {step['step_id']}. {step['goal']}")
+    print(f"  verifier: {final_state.get('verifier_status')}")
 
-    print("\n--- REPORT ---")
-    print(final_state.get("final_report", "(none)"))
+    print("\n--- ANSWER (final script's stdout) ---")
+    print(final_state.get("execution_result", {}).get("stdout", "(none)"))
 
     print("\n--- FILES ---")
     for f in list_workspace_files(task_id):

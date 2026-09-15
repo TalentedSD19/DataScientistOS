@@ -1,11 +1,10 @@
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from backend.config import MCP_WORKSPACE_URL, MCP_EXEC_URL, MCP_VALIDATE_URL
+from backend.config import MCP_WORKSPACE_URL, MCP_EXEC_URL
 
 _client = MultiServerMCPClient({
-    "workspace":  {"url": MCP_WORKSPACE_URL,  "transport": "streamable_http"},
-    "execution":  {"url": MCP_EXEC_URL,       "transport": "streamable_http"},
-    "validation": {"url": MCP_VALIDATE_URL,   "transport": "streamable_http"},
+    "workspace": {"url": MCP_WORKSPACE_URL, "transport": "streamable_http"},
+    "execution": {"url": MCP_EXEC_URL,      "transport": "streamable_http"},
 })
 
 # Remember the tool lists so we don't fetch them over and over
@@ -14,7 +13,7 @@ _cache: dict[str, list] = {}
 
 async def get_tools(*servers: str) -> list:
     """Get the tools from one or more servers."""
-    names = servers or ("workspace", "execution", "validation")
+    names = servers or ("workspace", "execution")
     tools = []
     for name in names:
         if name not in _cache:
@@ -39,7 +38,7 @@ def _as_text(result) -> str:
 
 
 async def call(server: str, tool_name: str, **kwargs) -> str:
-    """Call one tool directly, e.g. call('workspace', 'inspect_dataset', ...)."""
+    """Call one tool directly, e.g. call('workspace', 'write_file', ...)."""
     tools = await get_tools(server)
     tool = next(t for t in tools if t.name == tool_name)
     result = await tool.ainvoke(kwargs)

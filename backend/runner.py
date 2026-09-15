@@ -18,7 +18,7 @@ async def run(prompt: str, files: list[str], task_id: str | None = None) -> dict
         graph = build_graph(checkpointer=saver)
         state = await graph.ainvoke(
             {"task_id": task_id, "user_prompt": prompt, "input_files": names,
-             "retry_count": 0, "status": "planning", "logs": []},
-            config={"configurable": {"thread_id": task_id}, "recursion_limit": 60},
+             "step_count": 0, "debug_attempts": 0, "logs": []},
+            config={"configurable": {"thread_id": task_id}, "recursion_limit": 80},
         )
     return state

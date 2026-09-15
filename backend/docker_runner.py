@@ -75,11 +75,6 @@ def run_python_file(task_id: str, rel_path: str, timeout: int = EXEC_TIMEOUT) ->
     return exec_shell(task_id, f"python -u {rel_path}", timeout=timeout)
 
 
-def install_package(task_id: str, package: str) -> dict:
-    """pip install inside the sandbox. Only works if ALLOW_NETWORK=true."""
-    return exec_shell(task_id, f"pip install --no-cache-dir {package}", timeout=600)
-
-
 def destroy(task_id: str) -> None:
     """Delete the container. The files on disk stay."""
     try:

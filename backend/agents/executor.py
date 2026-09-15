@@ -29,7 +29,6 @@ async def execute_node(state: dict) -> dict:
     return {
         "execution_result": {**result, **_summarise_error(result)},
         "generated_files": result.get("files_created", []),
-        "status": "validating",
         "logs": [f"executor: exit code {result.get('exit_code')}, "
                  f"{len(result.get('files_created', []))} new files"],
     }
