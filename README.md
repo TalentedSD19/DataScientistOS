@@ -55,8 +55,10 @@ state each agent reads and writes is defined in `backend/graph/state.py`.
   query, given the plan so far and the last execution output.
 - **Coder** — implements the current plan as a single `src/main.py` script.
 - **Executor** — runs that script inside the task's Docker sandbox.
-- **Debugger** — if the script crashes, fixes it using the traceback (and the
-  file descriptions, since a traceback alone often isn't enough context).
+- **Debugger** — if the script crashes on a missing package, pip installs it
+  via `execute_shell` in the sandbox and just retries. Otherwise it fixes the
+  script using the traceback (and the file descriptions, since a traceback
+  alone often isn't enough context).
 - **Verifier** — an LLM judge that decides whether the plan + code + output
   are actually sufficient to answer the query.
 - **Router** — when the verifier says no, decides whether to add a new step
@@ -64,9 +66,16 @@ state each agent reads and writes is defined in `backend/graph/state.py`.
 
 ## Tools
 
-Every tool an agent can call — writing a script into the workspace, and
-running one — is served by a single MCP server: `mcp_servers/server.py`. All
-agents reach it through `backend/mcp_client.py`.
+Every tool an agent can call is served by a single MCP server:
+`mcp_servers/server.py`. All agents reach it through `backend/mcp_client.py`.
+
+- `write_file` — write a script into the task's workspace.
+- `execute_file` — run a script from the workspace inside the task's Docker sandbox.
+- `execute_shell` — run any shell command in that same sandbox. The debugger
+  uses this to `pip install` a package the moment it sees a
+  `ModuleNotFoundError`, rather than asking the LLM to rewrite working code.
+  This needs `ALLOW_NETWORK=true` (off by default — see Setup below), since
+  the sandbox has no internet access otherwise.
 
 All code the agents write is executed inside a per-task Docker container
 (`backend/docker_runner.py`, image built from `docker/Dockerfile.runtime`),

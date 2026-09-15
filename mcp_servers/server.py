@@ -1,10 +1,12 @@
 """The single MCP server that exposes every tool DS-STAR's agents use to touch
 the outside world.
 
-Two tools, and that's all an agent needs:
-  - write_file:    put a script into a task's workspace
-  - execute_file:  run a script that's already there, inside that task's Docker
-                    sandbox, and report what happened
+Three tools, and that's all an agent needs:
+  - write_file:     put a script into a task's workspace
+  - execute_file:   run a script that's already there, inside that task's
+                     Docker sandbox, and report what happened
+  - execute_shell:  run any shell command in that same sandbox (e.g. `pip
+                     install <package>` when the debugger hits a missing import)
 
 Every agent (analyzer, coder, debugger, executor) talks to this one server
 through backend.mcp_client -- there is no separate server per tool.
@@ -51,6 +53,18 @@ def execute_file(task_id: str, path: str, timeout: int = 600) -> str:
     Docker sandbox, and report exit code, stdout/stderr, and any new files."""
     before = _snapshot(task_id)
     result = docker_runner.run_python_file(task_id, path, timeout=timeout)
+    result["files_created"] = sorted(_snapshot(task_id) - before)
+    return json.dumps(result)
+
+
+@mcp.tool()
+def execute_shell(task_id: str, command: str, timeout: int = 600) -> str:
+    """Run any shell command inside the task's Docker sandbox -- most commonly
+    `pip install <package>` to add a library the generated code needs -- and
+    report exit code, stdout/stderr, and any new files. Requires ALLOW_NETWORK=true
+    (see backend/config.py) for anything that needs internet access, like pip."""
+    before = _snapshot(task_id)
+    result = docker_runner.exec_shell(task_id, command, timeout=timeout)
     result["files_created"] = sorted(_snapshot(task_id) - before)
     return json.dumps(result)
 

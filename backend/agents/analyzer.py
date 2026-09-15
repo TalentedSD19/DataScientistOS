@@ -5,7 +5,7 @@ import uuid
 from backend.llm import get_llm
 from backend.mcp_client import call
 from backend.config import MAX_DEBUG_ATTEMPTS
-from backend.agents.debugger import fix_code
+from backend.agents.debugger import fix_code, install_missing_package
 
 PROMPT = """You are an expert data analyst.
 Generate a Python code that loads and describes the content of {filename}.
@@ -50,7 +50,9 @@ async def _describe_one_file(task_id: str, file_name: str) -> str:
         if attempt == MAX_DEBUG_ATTEMPTS:
             return f"(could not describe this file: {(result.get('stderr') or '')[-500:]})"
 
-        code = await fix_code(code, result.get("stderr") or "")
+        traceback = result.get("stderr") or ""
+        if not await install_missing_package(task_id, traceback):
+            code = await fix_code(code, traceback)
 
 
 async def analyzer_node(state: dict) -> dict:
