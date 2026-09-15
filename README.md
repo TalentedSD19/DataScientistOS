@@ -10,46 +10,87 @@ queries (not the DS-STAR+ extension for open-ended report writing).
 DS-STAR answers a query about a set of data files by looping through five
 agents until an LLM judge decides the current plan and code are sufficient:
 
+## Architecture
+
 ```mermaid
 flowchart TD
-    START(["input files + query"]) --> Analyzer
+    START(["Input files + query"])
 
-    Analyzer["Analyzer<br/><small>describes every file:<br/>schema, sample rows, ...</small>"]
-    Retriever["Retriever<br/><small>keeps top-K relevant files<br/>only above 100 input files</small>"]
-    Planner["Planner<br/><small>proposes one small,<br/>concrete next step</small>"]
-    Coder["Coder<br/><small>writes the step into<br/>src/main.py</small>"]
-    Executor["Executor<br/><small>runs main.py in the<br/>task's Docker sandbox</small>"]
-    Debugger["Debugger<br/><small>pip installs missing pkgs,<br/>else fixes the traceback</small>"]
-    Verifier["Verifier<br/><small>LLM judge: is the plan + code<br/>+ output enough to answer?</small>"]
-    Router["Router<br/><small>ADD_STEP, or BACKTRACK<br/>to redo a bad step</small>"]
+    subgraph LG["LangGraph Workflow"]
+        direction TB
+        Analyzer["Analyzer<br/>Describes every file:<br/>schema, sample rows"]
+        Retriever["Retriever<br/>Keeps top-K relevant files<br/>(only above 100 files)"]
+        Planner["Planner<br/>Proposes one small,<br/>concrete next step"]
+        Coder["Coder<br/>Writes the step into<br/>src/main.py"]
+        Executor["Executor<br/>Runs main.py<br/>in the sandbox"]
+        ExecDecision{"Exit code?"}
+        Debugger["Debugger<br/>Installs missing packages<br/>or fixes the traceback"]
+        Verifier["Verifier<br/>LLM judge: is the output<br/>enough to answer?"]
+        VerifierDecision{"Verifier status?"}
+        Router["Router<br/>ADD_STEP or BACKTRACK"]
 
-    ExecDecision{"exit code?"}
-    VerifierDecision{"verifier_status?"}
+        Analyzer --> Retriever
+        Retriever --> Planner
+        Planner --> Coder
+        Coder --> Executor
+        Executor --> ExecDecision
+        ExecDecision -- "0" --> Verifier
+        ExecDecision -- "non-zero, retries left" --> Debugger
+        Debugger -- "retry" --> Executor
+        Verifier --> VerifierDecision
+        VerifierDecision -- "INSUFFICIENT, steps left" --> Router
+        Router -- "revise plan" --> Planner
+    end
 
-    GiveUp(["give up<br/><small>debug attempts exhausted</small>"])
-    Done(["done<br/><small>answer + artifacts</small>"])
+    subgraph INFRA["Execution Layer"]
+        direction TB
+        MCP[("MCP Tool Server")]
+        subgraph DOCKER["Docker Sandbox (one per task)"]
+            direction TB
+            Workspace["/workspace<br/>input data + src/main.py"]
+            Runtime["Python runtime<br/>isolated container"]
+            Artifacts["artifacts/<br/>plots, tables, models"]
+            Workspace --> Runtime
+            Runtime --> Artifacts
+        end
+        MCP ==> DOCKER
+    end
 
-    Analyzer --> Retriever --> Planner --> Coder --> Executor
-    Executor --> ExecDecision
-    ExecDecision -->|"0 (success)"| Verifier
-    ExecDecision -->|"nonzero, attempts < MAX_DEBUG_ATTEMPTS"| Debugger
-    ExecDecision -->|"nonzero, attempts exhausted"| GiveUp
-    Debugger --> Executor
+    GiveUp(["Give up<br/>Debug attempts exhausted"])
+    Done(["Done<br/>Answer + artifacts"])
 
-    Verifier --> VerifierDecision
-    VerifierDecision -->|"SUFFICIENT"| Done
-    VerifierDecision -->|"INSUFFICIENT, step_count < MAX_STEPS"| Router
-    VerifierDecision -->|"INSUFFICIENT, steps exhausted"| Done
-    Router -->|"back to Planner"| Planner
+    START --> Analyzer
+    ExecDecision -- "non-zero, retries exhausted" --> GiveUp
+    VerifierDecision -- "SUFFICIENT" --> Done
+    VerifierDecision -- "steps exhausted" --> Done
 
-    classDef agent fill:#e0ecff,stroke:#3b6fd6,stroke-width:1px,color:#1a1a1a;
-    classDef decision fill:#fff3cd,stroke:#d6a53b,stroke-width:1px,color:#1a1a1a;
-    classDef terminal fill:#dff5e1,stroke:#3bb35a,stroke-width:1px,color:#1a1a1a;
+    Analyzer -. "inspect files" .-> MCP
+    Executor -. "run code" .-> MCP
+    Debugger -. "pip install" .-> MCP
+    Artifacts -. "results" .-> Done
 
-    class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router agent;
-    class ExecDecision,VerifierDecision decision;
-    class START,GiveUp,Done terminal;
+    classDef agent fill:#e0ecff,stroke:#3b6fd6,stroke-width:1px,color:#111111
+    classDef decision fill:#fff3cd,stroke:#c9962c,stroke-width:1px,color:#111111
+    classDef success fill:#dff5e1,stroke:#3bb35a,stroke-width:1px,color:#111111
+    classDef failure fill:#fde2e2,stroke:#d64545,stroke-width:1px,color:#111111
+    classDef mcp fill:#efe6ff,stroke:#7b4bd6,stroke-width:1px,color:#111111
+    classDef docker fill:#e3f6fc,stroke:#1d8fbf,stroke-width:1px,color:#111111
+
+    class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router agent
+    class ExecDecision,VerifierDecision decision
+    class START,Done success
+    class GiveUp failure
+    class MCP mcp
+    class Workspace,Runtime,Artifacts docker
 ```
+
+**Legend**
+
+| Line style   | Meaning                                        |
+| ------------ | ---------------------------------------------- |
+| Solid arrow  | Control flow between LangGraph nodes           |
+| Dotted arrow | Tool call through the MCP server               |
+| Thick arrow  | MCP server executing inside the Docker sandbox |
 
 Solid arrows are the fixed pipeline; the loops are the interesting part: **Coder → Executor → Debugger → Executor**
 retries a crashing script, and **Verifier → Router → Planner** is DS-STAR's plan-refinement
