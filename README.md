@@ -1,6 +1,6 @@
 # DataScientistOS
 
-An implementation of **DS-STAR** (Nam et al., 2025) — a multi-agent system that
+An modified implementation of **DS-STAR** (Nam et al., 2025) — a multi-agent system that
 turns a natural-language data question plus a folder of data files into working
 code and an answer. This follows DS-STAR's core architecture for well-defined
 queries (not the DS-STAR+ extension for open-ended report writing).
@@ -144,6 +144,9 @@ Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Docker Desktop.
 uv sync
 cp .env.example .env   # then fill in your OPENAI_API_KEY
 ```
+
+To trace every agent's LLM calls in [LangSmith](https://smith.langchain.com), uncomment
+the `LANGCHAIN_*` lines in `.env` and add your API key -- no code changes needed.
 
 Build the sandbox image the executor runs code in:
 
