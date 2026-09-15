@@ -33,6 +33,9 @@ async def run(task_id: str, prompt: str, input_files: list[str], on_update=None)
     print(f"query: {prompt}")
     print(f"input files: {', '.join(input_files) or '(none)'}\n")
 
+    if on_update:
+        on_update("sandbox", {"logs": ["sandbox: spinning up the sandbox container"]})
+    print("  [sandbox] spinning up the sandbox container")
     get_or_create(task_id)  # make sure the task's sandbox container is up
 
     state: dict = {

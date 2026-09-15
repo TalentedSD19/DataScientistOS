@@ -115,8 +115,9 @@ async def debugger_node(state: dict) -> dict:
     )
     await call("write_file", task_id=task_id, path="src/main.py", content=code)
 
+    error_type = run.get("error_type") or "the error"
     return {
         "code": code,
         "debug_attempts": attempts,
-        "logs": [f"debugger: attempt {attempts}"],
+        "logs": [f"debugger: attempt {attempts} - rewriting code to fix {error_type}"],
     }

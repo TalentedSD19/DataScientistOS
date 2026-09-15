@@ -20,6 +20,9 @@ app.add_middleware(
 # Simple in-memory record of every task. Swap for a database later if you want.
 TASKS: dict[str, dict] = {}
 
+# The asyncio task actually running each job, so /tasks/{id}/stop can cancel it.
+RUNNING: dict[str, asyncio.Task] = {}
+
 
 @app.post("/tasks")
 async def create_task(prompt: str = Form(...),
@@ -36,7 +39,7 @@ async def create_task(prompt: str = Form(...),
     TASKS[task_id] = {"status": "queued", "logs": [], "prompt": prompt}
 
     # Run it in the background so the request doesn't hang for 5 minutes
-    asyncio.create_task(_run_in_background(task_id, prompt, names))
+    RUNNING[task_id] = asyncio.create_task(_run_in_background(task_id, prompt, names))
 
     return {"task_id": task_id, "status": "queued"}
 
@@ -58,9 +61,29 @@ async def _run_in_background(task_id: str, prompt: str, names: list[str]):
             on_update=lambda node_name, update: _record_update(task_id, node_name, update),
         )
         TASKS[task_id]["status"] = "done"
+        TASKS[task_id]["logs"].append(f"done: verifier={TASKS[task_id].get('verifier_status', 'n/a')}")
+    except asyncio.CancelledError:
+        TASKS[task_id]["status"] = "stopped"
+        TASKS[task_id]["logs"].append("stopped: cancelled by user")
     except Exception as e:
         TASKS[task_id]["status"] = "error"
         TASKS[task_id]["logs"].append(f"error: {e}")
+    finally:
+        RUNNING.pop(task_id, None)
+
+
+@app.post("/tasks/{task_id}/stop")
+async def stop_task(task_id: str):
+    """Cancel a running task. The sandbox container still gets cleaned up --
+    that happens in run()'s finally block, same as any other way the task ends."""
+    if task_id not in TASKS:
+        raise HTTPException(404, "no such task")
+
+    running_task = RUNNING.get(task_id)
+    if running_task and not running_task.done():
+        running_task.cancel()
+
+    return {"status": "stopping"}
 
 
 @app.get("/tasks/{task_id}")

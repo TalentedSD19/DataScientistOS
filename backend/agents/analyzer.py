@@ -108,5 +108,5 @@ async def analyzer_node(state: dict) -> dict:
 
     return {
         "data_descriptions": descriptions,
-        "logs": [f"analyzer: described {len(descriptions)} file(s)"],
+        "logs": [f"analyzer: described {len(descriptions)} file(s) - {', '.join(files)}"],
     }

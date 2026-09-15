@@ -1,7 +1,7 @@
 import json
 
 from backend.mcp_client import call
-from backend.config import EXEC_TIMEOUT
+from backend.config import EXEC_TIMEOUT, MAX_DEBUG_ATTEMPTS
 
 
 def _summarise_error(result: dict) -> dict:
@@ -25,10 +25,19 @@ async def execute_node(state: dict) -> dict:
                      task_id=state["task_id"], path="src/main.py",
                      timeout=EXEC_TIMEOUT)
     result = json.loads(raw) if isinstance(raw, str) else raw
+    summary = _summarise_error(result)
+
+    ok = result.get("exit_code") == 0
+    n_files = len(result.get("files_created", []))
+    if ok:
+        message = f"executor: ran successfully, {n_files} new file(s) created"
+    else:
+        message = f"executor: crashed - {summary['error_type']}: {summary['error_summary']}"
+        if state.get("debug_attempts", 0) >= MAX_DEBUG_ATTEMPTS:
+            message += f" (giving up after {MAX_DEBUG_ATTEMPTS} failed attempts)"
 
     return {
-        "execution_result": {**result, **_summarise_error(result)},
+        "execution_result": {**result, **summary},
         "generated_files": result.get("files_created", []),
-        "logs": [f"executor: exit code {result.get('exit_code')}, "
-                 f"{len(result.get('files_created', []))} new files"],
+        "logs": [message],
     }
