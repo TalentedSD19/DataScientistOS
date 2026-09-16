@@ -7,6 +7,13 @@ mixed CSV/JSON/text files, or anything in between, describe what you want
 and it plans, writes, runs, and debugs its own code in a sandboxed container
 until an LLM judge is satisfied — then writes up what it found.
 
+## Demo
+
+
+https://github.com/user-attachments/assets/c9d727d9-1a79-4079-9f9b-37b12339e786
+
+
+
 ## Architecture
 
 ```mermaid
