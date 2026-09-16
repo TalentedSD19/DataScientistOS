@@ -4,49 +4,8 @@ A multi-agent system that turns a natural-language data question plus a folder
 of data files into working code and an answer. Point it at a `.csv`, a pile of
 mixed CSV/JSON/text files, or anything in between, describe what you want
 ("clean this and plot revenue by month", "train a model to predict churn"),
-and it plans, writes, runs, and debugs its own code in a sandboxed
-container until an LLM judge is satisfied — then writes up what it found.
-
-## Inspired by DS-STAR
-
-The agent loop is based on **DS-STAR** (Nam et al., 2025 — Google Cloud &
-KAIST, [arXiv:2509.21825](https://arxiv.org/abs/2509.21825)): analyze every
-file first, then loop through *plan → code → execute → verify*, letting an
-LLM judge (not just "did it crash") decide when the answer is actually done,
-and letting a router either add the next step or backtrack and redo one that
-turned out wrong. This project implements that core loop for well-defined
-queries — not DS-STAR+, the paper's separate extension for open-ended report
-writing.
-
-**What's different from the paper:**
-
-- **Always reports.** The paper's well-defined-query loop stops at code + a
-  short answer; DS-STAR+'s report writer is a separate, open-ended-query
-  system. Here, a **Reporter** agent always runs last regardless — writing
-  `report.md` with the answer, the steps taken, and the files produced, or a
-  plain explanation of what went wrong if the run gave up.
-- **Faster debugging.** The paper's debugger always asks an LLM to rewrite
-  the script from the traceback. Here, a missing-package crash
-  (`ModuleNotFoundError`) is fixed by just `pip install`-ing it and retrying
-  — no LLM call needed for the most common failure.
-- **Per-agent models, not one frontier model.** The paper runs every agent on
-  a single model (Gemini-2.5-Pro in their main results). Here, each agent's
-  model is chosen independently (GPT-4o for the ones that need to reason
-  hardest — planner, verifier, debugger; GPT-4o-mini for the rest) and is
-  configurable per-role via `.env`.
-- **No finalizer agent.** The paper has a separate agent that applies
-  output-formatting rules to the final script; this is folded into the
-  Reporter instead.
-- **Different embedding model** for the retriever (OpenAI
-  `text-embedding-3-small` instead of the paper's Gemini-Embedding-001) —
-  same mechanism and thresholds otherwise (only kicks in above 100 files,
-  keeps the top 100).
-- **The productization layer is new**, since the paper describes only the
-  agent algorithm: LangGraph as the concrete orchestration framework, a
-  locked-down per-task Docker sandbox with no network access by default, an
-  MCP tool server as the only way agents touch that sandbox, a FastAPI +
-  React app with a live pipeline visualization, and optional LangSmith
-  tracing for per-task token/cost accounting.
+and it plans, writes, runs, and debugs its own code in a sandboxed container
+until an LLM judge is satisfied — then writes up what it found.
 
 ## Architecture
 
@@ -89,12 +48,42 @@ turned out wrong (up to `MAX_STEPS` rounds total). However the run ends, the
 Reporter always runs once at the end.
 
 Each agent is a small, single-purpose LLM call under `backend/agents/`, wired
-together as a LangGraph state machine in `backend/graph/graph.py`. All code
-the agents write is executed inside a per-task Docker container
-(`backend/docker_runner.py`) with no network access and CPU/memory limits by
-default — the host never runs LLM-generated code directly. Every tool an
-agent can call (`write_file`, `execute_file`, `execute_shell`) is served by a
-single MCP server (`mcp_servers/server.py`).
+together as a LangGraph state machine in `backend/graph/graph.py`.
+
+## Inspired by DS-STAR
+
+The agent loop is based on **DS-STAR** (Nam et al., 2025 — Google Cloud &
+KAIST, [arXiv:2509.21825](https://arxiv.org/abs/2509.21825)): analyze every
+file up front, then loop through *plan → code → execute → verify*, letting an
+LLM judge decide when the answer is actually done rather than just checking
+whether the code ran, and letting a router either add the next step or
+backtrack and redo one that turned out wrong. That loop is the heart of this
+project too, but getting it from a paper to something you can actually run
+against your own data meant building out a few things the paper doesn't
+cover.
+
+The biggest of those is where the code actually runs. The paper reasons about
+scripts and execution results in the abstract; here, every script an agent
+writes runs inside its own Docker container, spun up fresh per task with no
+network access and CPU/memory limits by default, and torn down the moment the
+task ends. The agents never touch the host, and the host never runs
+LLM-generated code directly. The only way an agent reaches that sandbox is
+through a small MCP tool server — `write_file`, `execute_file`, and
+`execute_shell` are the entire surface area, and it's the same server every
+agent talks to, which keeps the sandboxing logic in one place instead of
+scattered across nine agents.
+
+The other addition is the **Reporter**. The paper's loop is happy to stop at
+working code and a short answer; this project always finishes with a
+Reporter agent that writes a plain-language `report.md` — the answer, the
+steps it took to get there, and the files it produced — or, if it ran out of
+retries or steps, an honest explanation of what went wrong instead of just
+failing silently.
+
+All of that is wrapped in a FastAPI backend and a React frontend, so you can
+run a task from a browser instead of a terminal: upload files, type a prompt,
+and watch the pipeline above light up node by node as the agents work,
+finishing with a downloadable report and any files the run produced.
 
 ## Running it
 
@@ -123,11 +112,8 @@ uv run uvicorn backend.api.main:app --reload   # in one terminal
 cd frontend && npm install && npm run dev      # in another
 ```
 
-The UI lets you upload files, type a prompt, watch the pipeline diagram
-light up as each agent runs, and download the report and any files created
-when it's done. Each task gets its own folder under
-`storage/tasks/<task_id>/workspace/` and its own Docker container, torn down
-as soon as the task finishes.
+Each task gets its own folder under `storage/tasks/<task_id>/workspace/` and
+its own Docker container, torn down as soon as the task finishes.
 
 ## Layout
 
