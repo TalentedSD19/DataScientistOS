@@ -1,233 +1,133 @@
 # DataScientistOS
 
-An modified implementation of **DS-STAR** (Nam et al., 2025) — a multi-agent system that
-turns a natural-language data question plus a folder of data files into working
-code and an answer. This follows DS-STAR's core architecture for well-defined
-queries (not the DS-STAR+ extension for open-ended report writing).
+A multi-agent system that turns a natural-language data question plus a folder
+of data files into working code and an answer. Point it at a `.csv`, a pile of
+mixed CSV/JSON/text files, or anything in between, describe what you want
+("clean this and plot revenue by month", "train a model to predict churn"),
+and it plans, writes, runs, and debugs its own code in a sandboxed
+container until an LLM judge is satisfied — then writes up what it found.
 
-## How it works
+## Inspired by DS-STAR
 
-DS-STAR answers a query about a set of data files by looping through five
-agents until an LLM judge decides the current plan and code are sufficient:
+The agent loop is based on **DS-STAR** (Nam et al., 2025 — Google Cloud &
+KAIST, [arXiv:2509.21825](https://arxiv.org/abs/2509.21825)): analyze every
+file first, then loop through *plan → code → execute → verify*, letting an
+LLM judge (not just "did it crash") decide when the answer is actually done,
+and letting a router either add the next step or backtrack and redo one that
+turned out wrong. This project implements that core loop for well-defined
+queries — not DS-STAR+, the paper's separate extension for open-ended report
+writing.
+
+**What's different from the paper:**
+
+- **Always reports.** The paper's well-defined-query loop stops at code + a
+  short answer; DS-STAR+'s report writer is a separate, open-ended-query
+  system. Here, a **Reporter** agent always runs last regardless — writing
+  `report.md` with the answer, the steps taken, and the files produced, or a
+  plain explanation of what went wrong if the run gave up.
+- **Faster debugging.** The paper's debugger always asks an LLM to rewrite
+  the script from the traceback. Here, a missing-package crash
+  (`ModuleNotFoundError`) is fixed by just `pip install`-ing it and retrying
+  — no LLM call needed for the most common failure.
+- **Per-agent models, not one frontier model.** The paper runs every agent on
+  a single model (Gemini-2.5-Pro in their main results). Here, each agent's
+  model is chosen independently (GPT-4o for the ones that need to reason
+  hardest — planner, verifier, debugger; GPT-4o-mini for the rest) and is
+  configurable per-role via `.env`.
+- **No finalizer agent.** The paper has a separate agent that applies
+  output-formatting rules to the final script; this is folded into the
+  Reporter instead.
+- **Different embedding model** for the retriever (OpenAI
+  `text-embedding-3-small` instead of the paper's Gemini-Embedding-001) —
+  same mechanism and thresholds otherwise (only kicks in above 100 files,
+  keeps the top 100).
+- **The productization layer is new**, since the paper describes only the
+  agent algorithm: LangGraph as the concrete orchestration framework, a
+  locked-down per-task Docker sandbox with no network access by default, an
+  MCP tool server as the only way agents touch that sandbox, a FastAPI +
+  React app with a live pipeline visualization, and optional LangSmith
+  tracing for per-task token/cost accounting.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    START(["Input files + query"])
+    START(["Input files + query"]) --> Analyzer
 
-    subgraph LG["LangGraph Workflow"]
-        direction TB
-        Analyzer["Analyzer<br/>Describes every file:<br/>schema, sample rows"]
-        Retriever["Retriever<br/>Keeps top-K relevant files<br/>(only above 100 files)"]
-        Planner["Planner<br/>Proposes one small,<br/>concrete next step"]
-        Coder["Coder<br/>Writes the step into<br/>src/main.py"]
-        Executor["Executor<br/>Runs main.py<br/>in the sandbox"]
-        ExecDecision{"Exit code?"}
-        Debugger["Debugger<br/>Installs missing packages<br/>or fixes the traceback"]
-        Verifier["Verifier<br/>LLM judge: is the output<br/>enough to answer?"]
-        VerifierDecision{"Verifier status?"}
-        Router["Router<br/>ADD_STEP or BACKTRACK"]
-        Reporter["Reporter<br/>Writes report.md:<br/>answer, steps, files"]
+    Analyzer["Analyzer<br/>describes every file"] --> Retriever
+    Retriever["Retriever<br/>keeps top-K relevant files<br/>(only above 100 files)"] --> Planner
+    Planner["Planner<br/>proposes one concrete next step"] --> Coder
+    Coder["Coder<br/>writes the step into main.py"] --> Executor
+    Executor["Executor<br/>runs main.py in the sandbox"] --> ExecOK{"exit code?"}
 
-        Analyzer --> Retriever
-        Retriever --> Planner
-        Planner --> Coder
-        Coder --> Executor
-        Executor --> ExecDecision
-        ExecDecision -- "0" --> Verifier
-        ExecDecision -- "non-zero, retries left" --> Debugger
-        Debugger -- "retry" --> Executor
-        Verifier --> VerifierDecision
-        VerifierDecision -- "INSUFFICIENT, steps left" --> Router
-        Router -- "revise plan" --> Planner
-    end
+    ExecOK -- "0" --> Verifier
+    ExecOK -- "crashed, retries left" --> Debugger["Debugger<br/>pip installs, or fixes the traceback"]
+    ExecOK -- "crashed, retries exhausted" --> Reporter
+    Debugger --> Executor
 
-    subgraph INFRA["Execution Layer"]
-        direction TB
-        MCP[("MCP Tool Server")]
-        subgraph DOCKER["Docker Sandbox (one per task)"]
-            direction TB
-            Workspace["/workspace<br/>input data + src/main.py"]
-            Runtime["Python runtime<br/>isolated container"]
-            Artifacts["artifacts/<br/>plots, tables, models"]
-            Workspace --> Runtime
-            Runtime --> Artifacts
-        end
-        MCP ==> DOCKER
-    end
+    Verifier["Verifier<br/>LLM judge: is this enough?"] --> VerOK{"sufficient?"}
+    VerOK -- "yes" --> Reporter
+    VerOK -- "no, steps left" --> Router["Router<br/>add a step, or backtrack"]
+    VerOK -- "no, out of steps" --> Reporter
+    Router --> Planner
 
-    GiveUp(["Gave up<br/>No verified answer"])
-    Done(["Done<br/>Answer + artifacts"])
+    Reporter["Reporter<br/>writes report.md"] --> Done(["Done"])
 
-    START --> Analyzer
-    ExecDecision -- "non-zero, retries exhausted" --> Reporter
-    VerifierDecision -- "SUFFICIENT" --> Reporter
-    VerifierDecision -- "steps exhausted" --> Reporter
-    Reporter -- "SUFFICIENT" --> Done
-    Reporter -- "otherwise" --> GiveUp
-
-    Analyzer -. "inspect files" .-> MCP
-    Executor -. "run code" .-> MCP
-    Debugger -. "pip install" .-> MCP
-    Artifacts -. "results" .-> Done
-
-    classDef agent fill:#e0ecff,stroke:#3b6fd6,stroke-width:1px,color:#111111
-    classDef decision fill:#fff3cd,stroke:#c9962c,stroke-width:1px,color:#111111
-    classDef success fill:#dff5e1,stroke:#3bb35a,stroke-width:1px,color:#111111
-    classDef failure fill:#fde2e2,stroke:#d64545,stroke-width:1px,color:#111111
-    classDef mcp fill:#efe6ff,stroke:#7b4bd6,stroke-width:1px,color:#111111
-    classDef docker fill:#e3f6fc,stroke:#1d8fbf,stroke-width:1px,color:#111111
-
+    classDef agent fill:#e0ecff,stroke:#3b6fd6,color:#111
+    classDef decision fill:#fff3cd,stroke:#c9962c,color:#111
+    classDef term fill:#dff5e1,stroke:#3bb35a,color:#111
     class Analyzer,Retriever,Planner,Coder,Executor,Debugger,Verifier,Router,Reporter agent
-    class ExecDecision,VerifierDecision decision
-    class START,Done success
-    class GiveUp failure
-    class MCP mcp
-    class Workspace,Runtime,Artifacts docker
+    class ExecOK,VerOK decision
+    class START,Done term
 ```
 
-**Legend**
-
-| Line style   | Meaning                                        |
-| ------------ | ---------------------------------------------- |
-| Solid arrow  | Control flow between LangGraph nodes           |
-| Dotted arrow | Tool call through the MCP server               |
-| Thick arrow  | MCP server executing inside the Docker sandbox |
-
-Solid arrows are the fixed pipeline; the loops are the interesting part: **Coder → Executor → Debugger → Executor**
-retries a crashing script, and **Verifier → Router → Planner** is DS-STAR's plan-refinement
-loop, which can either add a step or backtrack to redo one that turned out wrong. However the run
-ends, **Reporter** runs once at the end to write a short, human-readable summary.
+Solid arrows are the fixed pipeline; the two loops are the interesting part —
+**Coder → Executor → Debugger → Executor** retries a crashing script (up to
+`MAX_DEBUG_ATTEMPTS`), and **Verifier → Router → Planner** is the
+plan-refinement loop, which either adds a step or backtracks to redo one that
+turned out wrong (up to `MAX_STEPS` rounds total). However the run ends, the
+Reporter always runs once at the end.
 
 Each agent is a small, single-purpose LLM call under `backend/agents/`, wired
-together as a LangGraph state machine in `backend/graph/graph.py`. The full
-state each agent reads and writes is defined in `backend/graph/state.py`.
+together as a LangGraph state machine in `backend/graph/graph.py`. All code
+the agents write is executed inside a per-task Docker container
+(`backend/docker_runner.py`) with no network access and CPU/memory limits by
+default — the host never runs LLM-generated code directly. Every tool an
+agent can call (`write_file`, `execute_file`, `execute_shell`) is served by a
+single MCP server (`mcp_servers/server.py`).
 
-- **Analyzer** — generates and runs a small Python script per file to produce
-  a text description of its structure and content (works for structured and
-  unstructured formats alike).
-- **Retriever** — with many input files, embeds the query and each file
-  description and keeps only the top-K most relevant ones.
-- **Planner** — proposes one small, concrete next step toward answering the
-  query, given the plan so far and the last execution output.
-- **Coder** — implements the current plan as a single `src/main.py` script.
-- **Executor** — runs that script inside the task's Docker sandbox.
-- **Debugger** — if the script crashes on a missing package, pip installs it
-  via `execute_shell` in the sandbox and just retries. Otherwise it fixes the
-  script using the traceback (and the file descriptions, since a traceback
-  alone often isn't enough context).
-- **Verifier** — an LLM judge that decides whether the plan + code + output
-  are actually sufficient to answer the query.
-- **Router** — when the verifier says no, decides whether to add a new step
-  or backtrack and redo a step that turned out to be wrong.
-- **Reporter** — runs once, however the run ends. Writes `report.md`: a
-  direct answer to the query, the steps taken, and the files created, or,
-  if it didn't work out, a plain explanation of what went wrong.
-
-## Tools
-
-Every tool an agent can call is served by a single MCP server:
-`mcp_servers/server.py`. All agents reach it through `backend/mcp_client.py`.
-
-- `write_file` — write a script into the task's workspace.
-- `execute_file` — run a script from the workspace inside the task's Docker sandbox.
-- `execute_shell` — run any shell command in that same sandbox. The debugger
-  uses this to `pip install` a package the moment it sees a
-  `ModuleNotFoundError`, rather than asking the LLM to rewrite working code.
-  This needs `ALLOW_NETWORK=true` (off by default — see Setup below), since
-  the sandbox has no internet access otherwise.
-
-All code the agents write is executed inside a per-task Docker container
-(`backend/docker_runner.py`, image built from `docker/Dockerfile.runtime`),
-with no network access by default and CPU/memory limits — the host never runs
-LLM-generated code directly.
-
-## Setup
+## Running it
 
 Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Docker Desktop.
 
 ```bash
 uv sync
-cp .env.example .env   # then fill in your OPENAI_API_KEY
-```
+cp .env.example .env      # fill in OPENAI_API_KEY
 
-To trace every agent's LLM calls in [LangSmith](https://smith.langchain.com), uncomment
-the `LANGCHAIN_*` lines in `.env` and add your API key -- no code changes needed.
-
-Build the sandbox image the executor runs code in:
-
-```bash
 docker build -t datasci-runtime:latest -f docker/Dockerfile.runtime docker
+
+uv run python -m mcp_servers.server    # keep running in its own terminal
 ```
 
-Start the MCP tool server (keep this running in its own terminal):
-
-```bash
-uv run python -m mcp_servers.server
-```
-
-## Running a task
-
-From the command line, everything is printed live as the agent works:
+Then, from the command line:
 
 ```bash
 uv run python scripts/run_task.py "train a model to predict Outcome" samples/data.csv
 ```
 
-Or over HTTP, via the FastAPI wrapper:
+Or over HTTP, with the React UI:
 
 ```bash
-uv run uvicorn backend.api.main:app --reload
+uv run uvicorn backend.api.main:app --reload   # in one terminal
+
+cd frontend && npm install && npm run dev      # in another
 ```
 
-```bash
-curl -X POST http://127.0.0.1:8000/tasks \
-  -F "prompt=train a model to predict Outcome" \
-  -F "files=@samples/data.csv"
-# then: GET /tasks/{task_id}, /tasks/{task_id}/logs, /tasks/{task_id}/result
-# POST /tasks/{task_id}/stop cancels a run in progress
-```
-
-Or from a browser, with the React UI under `frontend/` (see below).
-
-Each task gets its own folder under `storage/tasks/<task_id>/workspace/`
-(`input/` for uploaded files, `src/main.py` for the current solution, plus
-whatever the code itself produces, including the reporter's `report.md`)
-and its own Docker container for the duration of the run -- the container is
-torn down as soon as the task finishes, whether it succeeded, failed, or was
-stopped, so none are left orphaned. The final graph state also lands in
-`workspace/state/state.json`.
-
-## Frontend
-
-A small React UI (`frontend/`) lets you run a task from the browser: upload
-files, type a prompt, watch the pipeline diagram light up as each agent
-runs, and read or download the report and any files created when it's done.
-It talks to the FastAPI server above, so start that first.
-
-```bash
-cd frontend
-npm install     # first time only
-npm run dev
-```
-
-## Benchmark suite
-
-`scripts/make_sample.py` generates ten synthetic datasets under `samples/`,
-five of them paired with prompts in `scripts/run_task.py` that progressively
-exercise EDA, ML classification, forecasting, hypothesis testing, and
-multi-file root-cause analysis:
-
-```bash
-uv run python scripts/make_sample.py     # generates samples/*.csv
-uv run python scripts/run_task.py --benchmark        # all 5, in order
-uv run python scripts/run_task.py --benchmark 2      # just task 2 (churn ML)
-```
-
-Tasks 2 (churn ML) and 5 (multi-file root-cause analysis) are the most useful
-for exercising the debugger and the planner/router loop, since they're the
-least likely to succeed on the very first generated script.
+The UI lets you upload files, type a prompt, watch the pipeline diagram
+light up as each agent runs, and download the report and any files created
+when it's done. Each task gets its own folder under
+`storage/tasks/<task_id>/workspace/` and its own Docker container, torn down
+as soon as the task finishes.
 
 ## Layout
 
@@ -235,22 +135,13 @@ least likely to succeed on the very first generated script.
 backend/
   agents/        one file per DS-STAR agent
   graph/         the LangGraph state machine wiring the agents together
-  api/           FastAPI wrapper (optional HTTP interface)
-  config.py      every tunable in one place (model names, limits, ports)
+  api/           FastAPI wrapper
+  config.py      every tunable in one place
   llm.py         picks which model backs each agent role
-  schemas.py     structured-output types for the planner/verifier/router
-  mcp_client.py  talks to the MCP tool server
   docker_runner.py  starts/runs commands in each task's sandbox container
-  workspace.py   creates a task's folder layout, copies input files in
-  runner.py      runs the graph end to end, printing every step
 mcp_servers/
-  server.py      the single MCP server: write_file, execute_file
-docker/
-  Dockerfile.runtime        the sandbox image code executes in
-  requirements-runtime.txt  its Python packages
-scripts/
-  run_task.py    CLI entry point
-  make_sample.py regenerates samples/data.csv
-frontend/
-  src/           the React UI: upload form, pipeline diagram, logs, report
+  server.py      the single MCP server: write_file, execute_file, execute_shell
+docker/          the sandbox image code executes in
+scripts/         CLI entry point + sample data generator
+frontend/        the React UI: upload form, pipeline diagram, logs, report
 ```

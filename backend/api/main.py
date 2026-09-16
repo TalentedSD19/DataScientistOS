@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse
 from backend.config import workspace_dir
 from backend.workspace import create_workspace, list_workspace_files
 from backend.runner import run as run_task
+from backend.usage import get_usage
 
 app = FastAPI(title="DataScientistOS")
 
@@ -36,7 +38,10 @@ async def create_task(prompt: str = Form(...),
         (ws / "input" / f.filename).write_bytes(await f.read())
         names.append(f.filename)
 
-    TASKS[task_id] = {"status": "queued", "logs": [], "prompt": prompt}
+    TASKS[task_id] = {
+        "status": "queued", "logs": [], "prompt": prompt,
+        "started_at": datetime.now(timezone.utc),
+    }
 
     # Run it in the background so the request doesn't hang for 5 minutes
     RUNNING[task_id] = asyncio.create_task(_run_in_background(task_id, prompt, names))
@@ -112,6 +117,14 @@ def download_artifact(task_id: str, path: str):
     if not file_path.exists():
         raise HTTPException(404, "file not found")
     return FileResponse(file_path, filename=file_path.name)
+
+
+@app.get("/tasks/{task_id}/usage")
+def get_task_usage(task_id: str):
+    """Token usage and cost for this task, read from its LangSmith trace."""
+    if task_id not in TASKS:
+        raise HTTPException(404, "no such task")
+    return get_usage(task_id, TASKS[task_id]["started_at"])
 
 
 @app.get("/tasks/{task_id}/result")

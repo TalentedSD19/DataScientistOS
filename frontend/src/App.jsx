@@ -124,6 +124,24 @@ function parseReport(text) {
   return blocks
 }
 
+function formatTokens(n) {
+  return n.toLocaleString()
+}
+
+function formatCost(n) {
+  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`
+}
+
+function Usage({ usage }) {
+  if (!usage) return null
+  return (
+    <span className="usage-stat">
+      {formatTokens(usage.total_tokens)} tokens
+      {usage.total_cost != null && ` · ${formatCost(usage.total_cost)}`}
+    </span>
+  )
+}
+
 function Report({ text }) {
   return (
     <div className="report">
@@ -166,6 +184,7 @@ export default function App() {
   const [taskId, setTaskId] = useState(null)
   const [task, setTask] = useState(null)
   const [artifacts, setArtifacts] = useState([])
+  const [usage, setUsage] = useState(null)
   const [starting, setStarting] = useState(false)
   const [stopping, setStopping] = useState(false)
 
@@ -178,6 +197,10 @@ export default function App() {
 
     const timer = setInterval(async () => {
       const res = await fetch(`${API}/tasks/${taskId}`)
+      if (!res.ok) {
+        setTask((t) => ({ ...t, status: 'error', logs: [...(t?.logs || []), 'error: lost the task (the server may have restarted)'] }))
+        return
+      }
       const data = await res.json()
       setTask(data)
     }, 1200)
@@ -194,6 +217,31 @@ export default function App() {
       .then((data) => setArtifacts(data.files || []))
   }, [finished, taskId])
 
+  // Token usage and cost come from LangSmith, which can take a few seconds
+  // to finish rolling up a trace after the run ends -- so check a few times.
+  useEffect(() => {
+    if (!finished || !task?.report) return
+
+    let cancelled = false
+    let attempts = 0
+
+    async function poll() {
+      const res = await fetch(`${API}/tasks/${taskId}/usage`)
+      const data = await res.json()
+      if (cancelled || !data.available) return
+
+      if (data.found && data.total_tokens != null) {
+        setUsage(data)
+      } else if (attempts < 5) {
+        attempts += 1
+        setTimeout(poll, 2500)
+      }
+    }
+    poll()
+
+    return () => { cancelled = true }
+  }, [finished, taskId, task?.report])
+
   async function handleRun() {
     setStarting(true)
     const form = new FormData()
@@ -206,6 +254,7 @@ export default function App() {
     setTaskId(data.task_id)
     setTask({ status: data.status, logs: [] })
     setArtifacts([])
+    setUsage(null)
     setStarting(false)
   }
 
@@ -218,6 +267,7 @@ export default function App() {
     setTaskId(null)
     setTask(null)
     setArtifacts([])
+    setUsage(null)
     setPrompt('')
     setFiles([])
     setStopping(false)
@@ -237,28 +287,16 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>DataScientistOS</h1>
-        <p>Upload data, describe what you want, and watch the agents work through it.</p>
-      </header>
+      <div className="screen">
+        <header className="app-header">
+          <h1>DataScientistOS</h1>
+          <p>Upload data, describe what you want, and watch the agents work through it.</p>
+        </header>
 
-      <ResultBanner outcome={outcome} task={task || {}} />
+        <ResultBanner outcome={outcome} task={task || {}} />
 
-      {finished && task.report && (
-        <div className="panel report-panel">
-          <div className="report-header">
-            <h2 className="panel-title">Report</h2>
-            <a className="btn btn-secondary" href={`${API}/tasks/${taskId}/artifacts/report.md`} download>
-              Download report.md
-            </a>
-          </div>
-          <Report text={task.report} />
-        </div>
-      )}
-
-      <main>
-        <section className="left">
-          <div className="panel form-panel">
+        <main className="run-row">
+          <section className="panel col-form">
             <label className="field-label" htmlFor="prompt">What do you want to do?</label>
             <textarea
               id="prompt"
@@ -296,25 +334,49 @@ export default function App() {
               )}
               {running && <span className="running-indicator"><span className="spinner" /> running…</span>}
             </div>
-          </div>
+          </section>
 
-          <div className="panel">
+          <section className="panel col-pipeline">
             <h2 className="panel-title">Pipeline</h2>
             <PipelineGraph activeAgent={activeAgent} counts={counts} outcome={outcome} />
+          </section>
+
+          <section className="col-terminal">
+            <Terminal logs={task?.logs || []} running={!!running} />
+          </section>
+        </main>
+      </div>
+
+      {finished && (
+        <div className="results-row">
+          <div className="panel report-panel">
+            {task.report ? (
+              <>
+                <div className="report-header">
+                  <div>
+                    <h2 className="panel-title">Report</h2>
+                    <Usage usage={usage} />
+                  </div>
+                  <a className="btn btn-secondary" href={`${API}/tasks/${taskId}/artifacts/report.md`} download>
+                    Download report.md
+                  </a>
+                </div>
+                <Report text={task.report} />
+              </>
+            ) : (
+              <>
+                <h2 className="panel-title">Report</h2>
+                <p className="empty">No report was written.</p>
+              </>
+            )}
           </div>
 
-          {finished && (
-            <div className="panel">
-              <h2 className="panel-title">Files created</h2>
-              <ArtifactList taskId={taskId} files={artifacts} />
-            </div>
-          )}
-        </section>
-
-        <section className="right">
-          <Terminal logs={task?.logs || []} running={!!running} />
-        </section>
-      </main>
+          <div className="panel artifacts-panel">
+            <h2 className="panel-title">Files created</h2>
+            <ArtifactList taskId={taskId} files={artifacts} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

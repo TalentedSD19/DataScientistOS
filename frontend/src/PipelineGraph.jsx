@@ -1,36 +1,49 @@
 import { AGENTS, SANDBOX, AGENT_BY_ID } from './agents'
 
-// The pipeline is drawn as two lines, like text wrapping: the first half of
-// the work (get ready, plan, write code) on line one, the second half (run
-// it, check it, report back) on line two. Debugger and router are the two
-// retry loops, drawn below as a third, smaller row.
-const BOX_W = 150
-const BOX_H = 56
-const GAP = 190
-const ROW1_Y = 60
-const ROW2_Y = 300
-const LOOP_Y = 460
+// Mirrors the reference diagram: a steady top row (sandbox through coder),
+// a drop down to the executor, then a steady bottom row running back
+// leftward to the end. Two dashed loops hang off that spine -- debugger
+// retries the executor directly below it, router backtracks up to the
+// planner -- each in its own lane so nothing crosses the main flow.
+const BOX_W = 176
+const BOX_H = 66
 
-const ROW1 = ['sandbox', 'analyzer', 'retriever', 'planner', 'coder']
-const ROW2 = ['executor', 'verifier', 'reporter', 'end']
+const TOP_Y = 120
+const BOT_Y = 470
+const DBG_Y = 630
+const ROUTER_Y = 300
 
-const POS = {}
-ROW1.forEach((id, i) => { POS[id] = [90 + i * GAP, ROW1_Y] })
-ROW2.forEach((id, i) => { POS[id] = [90 + i * GAP, ROW2_Y] })
-POS.debugger = [POS.executor[0], LOOP_Y]
-POS.router = [380, LOOP_Y]
+const POS = {
+  sandbox: [150, TOP_Y],
+  analyzer: [445, TOP_Y],
+  retriever: [740, TOP_Y],
+  planner: [1035, TOP_Y],
+  coder: [1330, TOP_Y],
+  executor: [1330, BOT_Y],
+  verifier: [955, BOT_Y],
+  reporter: [610, BOT_Y],
+  end: [150, BOT_Y],
+  router: [995, ROUTER_Y],
+  debugger: [1330, DBG_Y],
+}
 
-const VIEW_W = 970
-const VIEW_H = 520
+const VIEW_W = 1480
+const VIEW_H = 720
 
-function rowLine(id, nextId, y) {
-  const x1 = POS[id][0] + BOX_W / 2 + 6
-  const x2 = POS[nextId][0] - BOX_W / 2 - 6
-  return <line key={id} x1={x1} y1={y} x2={x2} y2={y} stroke="#9aa1b0" strokeWidth="2.5" markerEnd="url(#arrow-neutral)" />
+function hline(fromId, toId, y) {
+  const x1 = POS[fromId][0] + BOX_W / 2 + 6
+  const x2 = POS[toId][0] - BOX_W / 2 - 6
+  return <line key={`${fromId}-${toId}`} x1={x1} y1={y} x2={x2} y2={y} stroke="#9aa1b0" strokeWidth="2.5" markerEnd="url(#arrow-neutral)" />
+}
+
+function hlineRev(fromId, toId, y) {
+  const x1 = POS[fromId][0] - BOX_W / 2 - 6
+  const x2 = POS[toId][0] + BOX_W / 2 + 6
+  return <line key={`${fromId}-${toId}`} x1={x1} y1={y} x2={x2} y2={y} stroke="#9aa1b0" strokeWidth="2.5" markerEnd="url(#arrow-neutral)" />
 }
 
 function Node({ x, y, label, color, active, count, dashed }) {
-  const fillOpacity = active ? 1 : count ? 0.16 : 0.05
+  const fillOpacity = active ? 1 : count ? 0.24 : 0.13
   return (
     <g>
       <rect
@@ -38,7 +51,7 @@ function Node({ x, y, label, color, active, count, dashed }) {
         y={y - BOX_H / 2}
         width={BOX_W}
         height={BOX_H}
-        rx={9}
+        rx={12}
         fill={color}
         fillOpacity={fillOpacity}
         stroke={color}
@@ -47,14 +60,14 @@ function Node({ x, y, label, color, active, count, dashed }) {
         className={active ? 'node-active' : undefined}
         style={{ color }}
       />
-      <text x={x} y={y + 6} textAnchor="middle" fontSize="18" fontWeight={active ? 600 : 500}
+      <text x={x} y={y + 8} textAnchor="middle" fontSize="27" fontWeight={active ? 600 : 500}
         fill={active ? '#fff' : 'var(--text)'}>
         {label}
       </text>
       {count > 1 && (
         <g>
-          <circle cx={x + BOX_W / 2 - 6} cy={y - BOX_H / 2 - 6} r={12} fill={color} />
-          <text x={x + BOX_W / 2 - 6} y={y - BOX_H / 2 - 2} textAnchor="middle" fontSize="13"
+          <circle cx={x + BOX_W / 2 - 8} cy={y - BOX_H / 2 - 8} r={14} fill={color} />
+          <text x={x + BOX_W / 2 - 8} y={y - BOX_H / 2 - 3} textAnchor="middle" fontSize="15"
             fontWeight="600" fill="#fff">
             {count}
           </text>
@@ -91,29 +104,34 @@ export default function PipelineGraph({ activeAgent, counts, outcome }) {
           </pattern>
         </defs>
 
-        <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="url(#blueprint-grid)" />
+        <rect x="0" y="0" width={VIEW_W} height={VIEW_H} rx="16" fill="url(#blueprint-grid)" />
 
-        {/* line one */}
-        {ROW1.slice(0, -1).map((id, i) => rowLine(id, ROW1[i + 1], ROW1_Y))}
-        {/* line two */}
-        {ROW2.slice(0, -1).map((id, i) => rowLine(id, ROW2[i + 1], ROW2_Y))}
+        {/* top row: the steady march forward */}
+        {hline('sandbox', 'analyzer', TOP_Y)}
+        {hline('analyzer', 'retriever', TOP_Y)}
+        {hline('retriever', 'planner', TOP_Y)}
+        {hline('planner', 'coder', TOP_Y)}
 
-        {/* the wrap from the end of line one to the start of line two */}
-        <path
-          d={`M${POS.coder[0]},${ROW1_Y + BOX_H / 2 + 4}
-              L${POS.coder[0]},${(ROW1_Y + ROW2_Y) / 2}
-              L${POS.executor[0]},${(ROW1_Y + ROW2_Y) / 2}
-              L${POS.executor[0]},${ROW2_Y - BOX_H / 2 - 6}`}
-          fill="none" stroke="#9aa1b0" strokeWidth="2.5" markerEnd="url(#arrow-neutral)"
-        />
+        {/* drop down into the executor */}
+        <line x1={POS.coder[0]} y1={TOP_Y + BOX_H / 2 + 4} x2={POS.executor[0]} y2={BOT_Y - BOX_H / 2 - 4}
+          stroke="#9aa1b0" strokeWidth="2.5" markerEnd="url(#arrow-neutral)" />
 
-        {/* retry loop: executor <-> debugger, crashes send it here and back */}
-        <path d="M65,332 C15,368 15,412 65,448" fill="none" stroke="#fb923c" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-amber)" />
-        <path d="M115,448 C165,412 165,368 115,332" fill="none" stroke="#fb923c" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-amber)" />
+        {/* bottom row: runs back leftward to the end */}
+        {hlineRev('executor', 'verifier', BOT_Y)}
+        {hlineRev('verifier', 'reporter', BOT_Y)}
+        {hlineRev('reporter', 'end', BOT_Y)}
 
-        {/* backtrack loop: verifier -> router -> planner, sends work back up to line one */}
-        <path d="M300,328 C 340,375 360,405 365,432" fill="none" stroke="#f472b6" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-pink)" />
-        <path d="M410,432 C 500,380 610,180 645,90" fill="none" stroke="#f472b6" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-pink)" />
+        {/* debugger retry loop: straight down from executor, straight back up */}
+        <path d={`M${POS.executor[0] - 26},${BOT_Y + BOX_H / 2} C ${POS.executor[0] - 40},${(BOT_Y + DBG_Y) / 2} ${POS.debugger[0] - 40},${(BOT_Y + DBG_Y) / 2} ${POS.debugger[0] - 26},${DBG_Y - BOX_H / 2}`}
+          fill="none" stroke="#fb923c" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-amber)" />
+        <path d={`M${POS.debugger[0] + 26},${DBG_Y - BOX_H / 2} C ${POS.debugger[0] + 40},${(BOT_Y + DBG_Y) / 2} ${POS.executor[0] + 40},${(BOT_Y + DBG_Y) / 2} ${POS.executor[0] + 26},${BOT_Y + BOX_H / 2}`}
+          fill="none" stroke="#fb923c" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-amber)" />
+
+        {/* router backtrack loop: verifier up to router, router up to planner */}
+        <line x1={POS.verifier[0] - 20} y1={BOT_Y - BOX_H / 2} x2={POS.router[0] - 20} y2={ROUTER_Y + BOX_H / 2}
+          fill="none" stroke="#f472b6" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-pink)" />
+        <line x1={POS.router[0] + 20} y1={ROUTER_Y - BOX_H / 2} x2={POS.planner[0] - 10} y2={TOP_Y + BOX_H / 2}
+          fill="none" stroke="#f472b6" strokeWidth="2.5" strokeDasharray="6 5" markerEnd="url(#arrow-pink)" />
 
         <Node
           x={POS.sandbox[0]}
