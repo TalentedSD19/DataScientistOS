@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse
 from backend.config import workspace_dir
 from backend.workspace import create_workspace, list_workspace_files
 from backend.runner import run as run_task
+from backend.usage import get_usage
 
 app = FastAPI(title="DataScientistOS")
 
@@ -19,6 +21,9 @@ app.add_middleware(
 
 # Simple in-memory record of every task. Swap for a database later if you want.
 TASKS: dict[str, dict] = {}
+
+# The asyncio task actually running each job, so /tasks/{id}/stop can cancel it.
+RUNNING: dict[str, asyncio.Task] = {}
 
 
 @app.post("/tasks")
@@ -33,10 +38,13 @@ async def create_task(prompt: str = Form(...),
         (ws / "input" / f.filename).write_bytes(await f.read())
         names.append(f.filename)
 
-    TASKS[task_id] = {"status": "queued", "logs": [], "prompt": prompt}
+    TASKS[task_id] = {
+        "status": "queued", "logs": [], "prompt": prompt,
+        "started_at": datetime.now(timezone.utc),
+    }
 
     # Run it in the background so the request doesn't hang for 5 minutes
-    asyncio.create_task(_run_in_background(task_id, prompt, names))
+    RUNNING[task_id] = asyncio.create_task(_run_in_background(task_id, prompt, names))
 
     return {"task_id": task_id, "status": "queued"}
 
@@ -45,7 +53,7 @@ def _record_update(task_id: str, node_name: str, update: dict) -> None:
     """Mirror one graph step into the TASKS dict so /tasks/{id} has live status."""
     TASKS[task_id]["status"] = node_name
     TASKS[task_id]["logs"].extend(update.get("logs", []))
-    for key in ("plan", "code", "execution_result", "verifier_status"):
+    for key in ("plan", "code", "execution_result", "verifier_status", "report"):
         if update.get(key):
             TASKS[task_id][key] = update[key]
 
@@ -58,9 +66,29 @@ async def _run_in_background(task_id: str, prompt: str, names: list[str]):
             on_update=lambda node_name, update: _record_update(task_id, node_name, update),
         )
         TASKS[task_id]["status"] = "done"
+        TASKS[task_id]["logs"].append(f"done: verifier={TASKS[task_id].get('verifier_status', 'n/a')}")
+    except asyncio.CancelledError:
+        TASKS[task_id]["status"] = "stopped"
+        TASKS[task_id]["logs"].append("stopped: cancelled by user")
     except Exception as e:
         TASKS[task_id]["status"] = "error"
         TASKS[task_id]["logs"].append(f"error: {e}")
+    finally:
+        RUNNING.pop(task_id, None)
+
+
+@app.post("/tasks/{task_id}/stop")
+async def stop_task(task_id: str):
+    """Cancel a running task. The sandbox container still gets cleaned up --
+    that happens in run()'s finally block, same as any other way the task ends."""
+    if task_id not in TASKS:
+        raise HTTPException(404, "no such task")
+
+    running_task = RUNNING.get(task_id)
+    if running_task and not running_task.done():
+        running_task.cancel()
+
+    return {"status": "stopping"}
 
 
 @app.get("/tasks/{task_id}")
@@ -91,6 +119,14 @@ def download_artifact(task_id: str, path: str):
     return FileResponse(file_path, filename=file_path.name)
 
 
+@app.get("/tasks/{task_id}/usage")
+def get_task_usage(task_id: str):
+    """Token usage and cost for this task, read from its LangSmith trace."""
+    if task_id not in TASKS:
+        raise HTTPException(404, "no such task")
+    return get_usage(task_id, TASKS[task_id]["started_at"])
+
+
 @app.get("/tasks/{task_id}/result")
 def get_result(task_id: str):
     """Everything in one call: the final code, its output, and the plan that led there."""
@@ -102,5 +138,6 @@ def get_result(task_id: str):
         "plan": task.get("plan"),
         "code": task.get("code"),
         "answer": run.get("stdout"),
+        "report": task.get("report"),
         "artifacts": list_workspace_files(task_id),
     }

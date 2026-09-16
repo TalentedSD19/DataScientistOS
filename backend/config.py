@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()  # reads the .env file
 
+# LangSmith tracing is opt-in via LANGCHAIN_TRACING_V2=true in .env; langchain reads
+# it (and LANGCHAIN_API_KEY) straight from the environment, no code needed here.
+# This just gives traces a sensible project name if one wasn't set.
+os.environ.setdefault("LANGCHAIN_PROJECT", "DataScientistOS")
+
 # Project root folder (one level above backend/)
 ROOT = Path(__file__).resolve().parent.parent
 

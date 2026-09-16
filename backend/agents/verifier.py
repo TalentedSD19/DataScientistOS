@@ -3,6 +3,7 @@ import json
 from backend.llm import get_llm
 from backend.mcp_client import call
 from backend.schemas import VerifierResult
+from backend.config import MAX_STEPS
 
 PROMPT = """You are an expert data analyst.
 Your task is to check whether the current plan and its code implementation is enough to
@@ -59,7 +60,11 @@ async def verifier_node(state: dict) -> dict:
         prompt=state["user_prompt"],
     ))
 
+    message = f"verifier: {result.status} ({len(workspace_files.splitlines())} file(s) on disk)"
+    if result.status != "SUFFICIENT" and state.get("step_count", 0) >= MAX_STEPS:
+        message += f" - reached the {MAX_STEPS}-step limit, stopping here"
+
     return {
         "verifier_status": result.status,
-        "logs": [f"verifier: {result.status} ({len(workspace_files.splitlines())} file(s) on disk)"],
+        "logs": [message],
     }

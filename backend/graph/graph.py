@@ -9,6 +9,7 @@ from backend.agents.executor import execute_node
 from backend.agents.debugger import debugger_node
 from backend.agents.verifier import verifier_node
 from backend.agents.router import router_node
+from backend.agents.reporter import reporter_node
 from backend.config import MAX_DEBUG_ATTEMPTS, MAX_STEPS
 
 
@@ -43,6 +44,7 @@ def build_graph(checkpointer=None):
     graph.add_node("debugger", debugger_node)
     graph.add_node("verifier", verifier_node)
     graph.add_node("router", router_node)
+    graph.add_node("reporter", reporter_node)
 
     graph.add_edge(START, "analyzer")
     graph.add_edge("analyzer", "retriever")
@@ -53,14 +55,15 @@ def build_graph(checkpointer=None):
     graph.add_conditional_edges("executor", after_execution, {
         "ok": "verifier",
         "debug": "debugger",
-        "give_up": END,
+        "give_up": "reporter",
     })
     graph.add_edge("debugger", "executor")
 
     graph.add_conditional_edges("verifier", after_verifier, {
-        "done": END,
+        "done": "reporter",
         "insufficient": "router",
     })
     graph.add_edge("router", "planner")
+    graph.add_edge("reporter", END)
 
     return graph.compile(checkpointer=checkpointer)

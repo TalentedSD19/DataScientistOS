@@ -5,9 +5,16 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from backend.graph.graph import build_graph
 from backend.docker_runner import get_or_create, destroy
 from backend.workspace import save_state
-from backend.config import ROOT
+from backend.config import ROOT, MAX_STEPS, MAX_DEBUG_ATTEMPTS
 
 CHECKPOINTS_DB = str(ROOT / "storage" / "checkpoints.db")
+
+# A planning round is planner+coder+executor+verifier+router (5 nodes), plus up
+# to MAX_DEBUG_ATTEMPTS debugger+executor retries if the script crashes. Without
+# this, a run that genuinely needs its full MAX_STEPS budget can hit LangGraph's
+# recursion_limit and crash before after_verifier's own step_count >= MAX_STEPS
+# check ever gets a chance to stop it gracefully.
+RECURSION_LIMIT = MAX_STEPS * (5 + 2 * MAX_DEBUG_ATTEMPTS)
 
 
 async def run(task_id: str, prompt: str, input_files: list[str], on_update=None) -> dict:
@@ -26,6 +33,9 @@ async def run(task_id: str, prompt: str, input_files: list[str], on_update=None)
     print(f"query: {prompt}")
     print(f"input files: {', '.join(input_files) or '(none)'}\n")
 
+    if on_update:
+        on_update("sandbox", {"logs": ["sandbox: spinning up the sandbox container"]})
+    print("  [sandbox] spinning up the sandbox container")
     get_or_create(task_id)  # make sure the task's sandbox container is up
 
     state: dict = {
@@ -41,7 +51,7 @@ async def run(task_id: str, prompt: str, input_files: list[str], on_update=None)
             # which lets us print progress live instead of waiting for the whole run.
             async for event in graph.astream(
                 state,
-                config={"configurable": {"thread_id": task_id}, "recursion_limit": 80},
+                config={"configurable": {"thread_id": task_id}, "recursion_limit": RECURSION_LIMIT},
             ):
                 for node_name, update in event.items():
                     for line in update.get("logs", []):
